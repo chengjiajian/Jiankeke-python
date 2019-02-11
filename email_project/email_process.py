@@ -515,7 +515,8 @@ class QuanlianExcelProcess:
                         advance = 0
                         for i in range(0, sheet.nrows):
                             row_value = sheet.row_values(i)
-                            if row_value[0] == value['end_feature']:
+                            print(row_value)
+                            if row_value[0] == value['end_feature'] or row_value[0] in ['合计:', '合计']:
                                 print('{} 已到最后一行'.format(insurance_company_name))
                                 break
                             elif head_row:
@@ -567,7 +568,7 @@ class QuanlianExcelProcess:
                                 income_column = row_value.index(value['income_name'])
                                 head_row = 1
                         cationDate = datetime.datetime.now().strftime('%Y-%m-%d')
-                        advance_insert_list = [(cationDate, organization, company, cationSign, amount, policyCount, advance, 1), ]
+                        advance_insert_list = [(cationDate, organization, company, cationSign, amount*incomeRatio, policyCount, advance, 1), ]
                         MysqlAnalyzeUsage.insert_loan_info(advance_insert_list)
                         break
             # 非 垫资 众安
@@ -789,6 +790,11 @@ def main_job():
                                 excel_process = QuanlianExcelProcess(sum_list)
                                 excel_process.process_data(folder=excel_folder_path, single_excel_name=file)
                         except Exception as e:
+                            if '聚仁' in main_folder_name:
+                                sendsSMS(phone=juren_phone)
+                            elif '全联' in main_folder_name:
+                                sendsSMS(phone=quanlian_phone)
+                            sendsSMS()
                             print('发生错误{}'.format(e))
                             write_down_error(str(e))
             ruuning_time_count += 1
@@ -798,6 +804,7 @@ def main_job():
             time.sleep(60 * 7)
     except Exception as e:
         print('发生未知错误，详情请看日志')
+        sendsSMS()
         write_down_error('run {} times '.format(ruuning_time_count) + '\n' + str(e))
         print('系统将在 45 分钟后重启： {}'.format(datetime.datetime.now() + timedelta(minutes=45)))
         time.sleep(60 * 30)

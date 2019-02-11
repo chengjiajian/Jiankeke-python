@@ -200,7 +200,6 @@ class ProcessExcelRetail:
                 insuranceCompany = row_value[insur_type_column]
                 company = company_name_dict[insuranceCompany]
                 insuranceOrgnization = '四川聚仁保险代理有限公司'
-               # print(row_value[sign_date_column])
                 try:
                     writeDate = xldate_as_datetime(row_value[sign_date_column],0)
                 except Exception:
@@ -211,10 +210,10 @@ class ProcessExcelRetail:
                 comm_num = row_value[comm_num_column]
                 comp_num = row_value[comp_num_column]
                 if comm_num:
+                    comm_income = row_value[comm_income_column] if row_value[comm_income_column] else 0
                     comm_price = Decimal(row_value[comm_price_column]).quantize(Decimal('0.00')) if row_value[comm_price_column] else Decimal('0.00')
-                    if (writeDate, comm_price, comm_num) not in self.insurance_list:
+                    if (writeDate, comm_income, comm_num) not in self.insurance_list:
                         comm_rate  = Decimal(row_value[comm_rate_column]).quantize(Decimal('0.00')) if row_value[comm_rate_column] else Decimal(0)
-                        comm_income = row_value[comm_income_column]
                         insuranceType = 2
                         insuranceName = '商业险'
                         single_info = (organization, company, insuranceCompany, insuranceOrgnization, writeDate, insurancePerson, insuranceIdCard, licenseNumber, comm_price, comm_rate, comm_income, status, uid, uName, createTime, flag, type_flag, insuranceType, insuranceName, comm_num, sign, cationSign, comm_price, comm_rate, 0, 1)
@@ -222,9 +221,9 @@ class ProcessExcelRetail:
                         insurance_info_insert_list.append(single_info)
                 if comp_num:
                     comp_price = Decimal(row_value[comp_price_column]).quantize(Decimal('0.00')) if row_value[comp_price_column] else Decimal('0.00')
-                    if (writeDate, comp_price, comp_num) not in self.insurance_list:
+                    comp_income = row_value[comp_income_column] if row_value[comp_income_column] else 0
+                    if (writeDate, comp_income, comp_num) not in self.insurance_list:
                         comp_rate = Decimal(row_value[comp_rate_column]).quantize(Decimal('0.00')) if row_value[comp_rate_column] else Decimal(0)
-                        comp_income = row_value[comp_income_column]
                         insuranceType = 1
                         insuranceName = '交强险'
                         single_info = (organization, company, insuranceCompany, insuranceOrgnization, writeDate, insurancePerson, insuranceIdCard, licenseNumber, comp_price, comp_rate, comp_income, status, uid, uName, createTime, flag, type_flag, insuranceType, insuranceName, comp_num, sign, cationSign, comp_price, comp_rate, 0, 1)
@@ -337,10 +336,10 @@ class ProcessExcelLoan:
                 total_dict[date_format]['loan_income'] += income
                 rate = Decimal(row_value[rate_column]).quantize(Decimal('0.00'))
                 additional_info = row_value[additional_info_column]
-                if (writeDate, insur_sum_price, insur_num) not in self.insurance_list:
+                if (writeDate, income, insur_num) not in self.insurance_list:
                     single_info = (
                     organization, company, insuranceCompany, insuranceOrgnization, writeDate, owner_name, '', '',insur_sum_price, rate, income, status, uid, uName, createTime, flag, type_flag, insuranceType,insuranceName, insur_num, sign, cationSign, income, rate, 1, 1)
-                    self.insurance_list.append((writeDate, insur_sum_price, insur_num))
+                    self.insurance_list.append((writeDate, income, insur_num))
                     insurance_info_insert_list.append(single_info)
             elif '支付申请号生成日期:' in row_value:
                 for i in row_value:
@@ -458,6 +457,19 @@ class QuanlianExcelProcess:
                 'rate_name': '经纪费率',
                 'income_name': '经纪费金额',
                 'end_feature': '',
+                'calculate_rate': 0.99},
+            '平安非垫资': {
+                'sheet_index': 0,
+                'company': '平安保险',
+                'insuranceCompany': '平安保险',
+                'header_feature': '保单号',
+                'insur_num_name': '保单号',
+                'insur_type_name': '险种',
+                'owner_name_name': '客户',
+                'insur_sum_price_name': '保费收入',
+                'rate_name': '本次比例%',
+                'income_name': '本次手续费/经纪费(人民币)',
+                'end_feature': '领导审批:',
                 'calculate_rate': 0.99}
         }
 
@@ -481,10 +493,10 @@ class QuanlianExcelProcess:
             month_date = date_info[4:6]
             day_date = date_info[-2:]
             head_row = ''
-            #print(self.header_dict)
             # 垫资 逻辑处理
             if '非垫资' not in single_excel_name and re.findall(re.compile('.xls$'), single_excel_name):
                 data_type = 1
+                print(single_excel_name)
                 for insurance_company_name, value in self.header_dict.items():
                     if insurance_company_name in single_excel_name:
                         sign = str(int(time.time() * 1000))
@@ -535,7 +547,7 @@ class QuanlianExcelProcess:
                                 total_dict[date_format]['loan_income'] += income * Decimal(incomeRatio)
                                 rate = Decimal(row_value[rate_column]).quantize(Decimal('0.00'))
                                 policyCount += 1
-                                if (writeDate, insur_sum_price, insur_num) not in self.insurance_list:
+                                if (writeDate, income, insur_num) not in self.insurance_list:
                                     single_info = (
                                         organization, company, insuranceCompany, insuranceOrgnization,
                                         writeDate, owner_name,
@@ -544,7 +556,7 @@ class QuanlianExcelProcess:
                                         type_flag,
                                         insuranceType,
                                         insuranceName, insur_num, sign, cationSign, income*payRatio, payRatio, 1, 1)
-                                    self.insurance_list.append((writeDate, insur_sum_price, insur_num))
+                                    self.insurance_list.append((writeDate, income, insur_num))
                                     insurance_info_insert_list.append(single_info)
                             elif value['header_feature'] in row_value:
                                 insur_num_column = row_value.index(value['insur_num_name'])
@@ -558,7 +570,7 @@ class QuanlianExcelProcess:
                         advance_insert_list = [(cationDate, organization, company, cationSign, amount, policyCount, advance, 1), ]
                         MysqlAnalyzeUsage.insert_loan_info(advance_insert_list)
                         break
-            # 非 垫资 逻辑处理
+            # 非 垫资 众安
             elif '非垫资' in single_excel_name and '众安' in single_excel_name and re.findall(re.compile('.xlsx$'), single_excel_name):
                 print('众安保险')
                 sign = str(int(time.time() * 1000))
@@ -605,7 +617,7 @@ class QuanlianExcelProcess:
                         total_dict[date_format]['loan_insur_price'] += insur_sum_price
                         # total_dict[date_format]['loan_income'] += income   众安无法按照单条累积 计算总的佣金，先注释预留
                         rate = Decimal(income / insur_sum_price).quantize(Decimal('0.00')) if insur_sum_price != 0 else 0
-                        if (writeDate, insur_sum_price, insur_num) not in self.insurance_list:
+                        if (writeDate, income, insur_num) not in self.insurance_list:
                             single_info = (
                                 organization, company, insuranceCompany, insuranceOrgnization,
                                 writeDate, owner_name,
@@ -614,7 +626,7 @@ class QuanlianExcelProcess:
                                 type_flag,
                                 insuranceType,
                                 insuranceName, insur_num, sign, cationSign, 0, 0, 2, 0)
-                            self.insurance_list.append((writeDate, insur_sum_price, insur_num))
+                            self.insurance_list.append((writeDate, income, insur_num))
                             insurance_info_insert_list.append(single_info)
                     elif '保单号' in row_value:
                         insur_num_column = row_value.index('保单号')
@@ -626,6 +638,82 @@ class QuanlianExcelProcess:
                         #rate_column = row_value.index(value['rate_name'])
                         income_column = row_value.index('费用（元）')
                         head_row = 1
+            # 非 垫资 平安
+            elif '非垫资' in single_excel_name and '平安' in single_excel_name and re.findall(re.compile('.xls$'),single_excel_name):
+                print('平安')
+                data_type = 2
+                for insurance_company_name, value in self.header_dict.items():
+                    if insurance_company_name in single_excel_name:
+                        sign = str(int(time.time() * 1000))
+                        cationSign = 'ADCH{}SH24'.format(sign)
+                        payRatio, incomeRatio = (1, 0.99)
+                        company = value['company']
+                        insuranceCompany = value['insuranceCompany']
+                        if re.findall('xls$', single_excel_name):
+                            excel = open_workbook(file_path)
+                            sheet = excel.sheet_by_index(0)
+                            sheet_list = [sheet.row_values(i) for i in range(sheet.nrows)]
+                        elif re.findall('xlsx$', single_excel_name):
+                            excel = load_workbook(file_path, data_only=True)
+                            sheetNames = excel.sheetnames
+                            sheet = excel[sheetNames[1]] if '中国银行' in sheetNames else excel[sheetNames[0]]
+                            sheet_list = [[cell.value for cell in i] for i in sheet.iter_rows()]
+                        policyCount = 0
+                        amount = 0
+                        advance = 0
+                        for row_value in sheet_list:
+                            if row_value[0] == value['end_feature']:
+                                print('{} 已到最后一行'.format(insurance_company_name))
+                                break
+                            elif head_row:
+                                writeDate = parse('{}/{}/{}'.format(year_date, month_date, day_date))
+                                date_format = writeDate.strftime("%Y-%m")
+                                if date_format not in total_dict:
+                                    total_dict[date_format] = {'loan_insur_price': 0,
+                                                               'loan_income': 0}
+                                insur_num = row_value[insur_num_column]
+                                insur_code_type = row_value[insur_type_column]
+                                if insur_code_type in self.insurance_type_dict:
+                                    insuranceName = self.insurance_type_dict[insur_code_type]
+                                    if insuranceName == '商业险':
+                                        insuranceType = '2'
+                                    elif insuranceName == '交强险':
+                                        insuranceType = '1'
+                                    else:
+                                        insuranceType = '3'
+                                else:
+                                    insuranceType = '3'
+                                    insuranceName = insur_code_type
+                                owner_name = row_value[owner_name_column]
+                                insur_sum_price = Decimal(row_value[insur_sum_price_column]).quantize(
+                                    Decimal('0.00'))
+                                income = Decimal(row_value[income_column]).quantize(Decimal('0.00'))
+                                amount += income
+                                advance += income * payRatio
+                                total_dict[date_format]['loan_insur_price'] += insur_sum_price
+                                total_dict[date_format]['loan_income'] += income * Decimal(incomeRatio)
+                                rate = Decimal(row_value[rate_column]).quantize(Decimal('0.00'))
+                                policyCount += 1
+                                if (writeDate, income, insur_num) not in self.insurance_list:
+                                    single_info = (
+                                        organization, company, insuranceCompany, insuranceOrgnization,
+                                        writeDate, owner_name,
+                                        '', '',
+                                        insur_sum_price, rate, income, status, uid, uName, createTime, flag,
+                                        type_flag,
+                                        insuranceType,
+                                        insuranceName, insur_num, sign, cationSign, 0, 0, 2, 0)
+                                    self.insurance_list.append((writeDate, income, insur_num))
+                                    insurance_info_insert_list.append(single_info)
+                            elif value['header_feature'] in row_value:
+                                insur_num_column = row_value.index(value['insur_num_name'])
+                                insur_type_column = row_value.index(value['insur_type_name'])
+                                owner_name_column = row_value.index(value['owner_name_name'])
+                                insur_sum_price_column = row_value.index(value['insur_sum_price_name'])
+                                rate_column = row_value.index(value['rate_name'])
+                                income_column = row_value.index(value['income_name'])
+                                head_row = 1
+                        break
             if total_dict:
                 for month_date_format, value in total_dict.items():
                     print(month_date_format, value)
@@ -644,75 +732,76 @@ class QuanlianExcelProcess:
 
 # 主任务流程
 def main_job():
-# try:
-    write_down_error('开始执行主任务')
-    ruuning_time_count = 0
-    sum_list = get_all_info()
-    while True:
-        mail = ProcessEmail()
-        email_info = mail.get_excel_from_email()
-        print(email_info)
-        # print(sum_list)
-        if email_info['status'] == 1:
-            for email_title in email_info['mail_list']:
-                # 切片取 email的 前四位 来区分业务情况
-                main_folder_name = email_title[:4]
-                excel_folder_path = os.path.join(main_path, main_folder_name, email_title)
-                for file in os.listdir(excel_folder_path):
-                # try:
-                    excel_path = os.path.join(excel_folder_path, file)
-                    print(excel_path)
-                    # 婉怡：零售 + 过账不垫资业务
-                    if main_folder_name == '聚仁台账':
-                        # 初始化读取零售过账业务的模板
-                        excel_process = ProcessExcelRetail(sum_list)
-                        # 模板读表信息
-                        excel_process.load_excel_retail(excel_path)
-                        retail_data_inPrice, retail_data_inCharge, retail_data_count = excel_process.load_sheet_retail()
-                        unloan_data_inPrice, unloan_data_inCharge, unloan_data_count = excel_process.load_sheet_unloan()
-                        data_info = {0: {'inPrice': retail_data_inPrice,
-                                         'inCharges': retail_data_inCharge,
-                                         'count': retail_data_count},
-                                     2: {'inPrice': unloan_data_inPrice,
-                                         'inCharges': unloan_data_inCharge,
-                                         'count': unloan_data_count}}
-                        print('excel data:', data_info)
-                        # 因为是累加式的数据，所以我们需要做个减法在录入
-                        differ = calculate_differ(data_info, month_time=excel_process.month)
-                        print('after data:', differ)
-                        if int((datetime.datetime(year=int(email_title[4:8]), month=excel_process.month,
-                                                  day=1) - datetime.datetime.now()).days) > 0:
-                            now_year = int(email_title[4:8]) - 1
-                        else:
-                            now_year = email_title[4:8]
-                        # 插入数据
-                        MysqlAnalyzeUsage.insert_data(differ, year_time=now_year, file_name=file)
-                    # 婉怡：垫资业务
-                    elif main_folder_name == '聚仁垫资':
-                        # 初始化一个读取垫资的模板
-                        excel_process = ProcessExcelLoan(sum_list)
-                        # 模板读表
-                        excel_process.load_excel_info(folder=excel_folder_path, single_excel_name=file)
-                        # 处理数据
-                        excel_process.process_data()
-                    # 文才：垫资 + 非垫资 业务
-                    elif main_folder_name == '全联表格':
-                        # 初始化一个读取全联的模板
-                        excel_process = QuanlianExcelProcess(sum_list)
-                        excel_process.process_data(folder=excel_folder_path, single_excel_name=file)
-                # except Exception as e:
-                #     write_down_error('******************************出错excel：{}'.format(excel_path) + '\n' + str(e))
-        ruuning_time_count += 1
-        next_time = '本次扫描结束，下次扫描时间 {}'.format(datetime.datetime.now() + timedelta(minutes=7))
-        print(next_time)
-        write_down_time(next_time)
-        time.sleep(60 * 7)
-# except Exception as e:
-#     print('发生未知错误，详情请看日志')
-#     write_down_error('run {} times '.format(ruuning_time_count) + '\n' + str(e))
-#     print('系统将在 45 分钟后重启： {}'.format(datetime.datetime.now() + timedelta(minutes=45)))
-#     time.sleep(60 * 30)
-#     main_job()
+    try:
+        write_down_error('开始执行主任务')
+        ruuning_time_count = 0
+        sum_list = get_all_info()
+        while True:
+            mail = ProcessEmail()
+            email_info = mail.get_excel_from_email()
+            print(email_info)
+            # print(sum_list)
+            if email_info['status'] == 1:
+                for email_title in email_info['mail_list']:
+                    # 切片取 email的 前四位 来区分业务情况
+                    main_folder_name = email_title[:4]
+                    excel_folder_path = os.path.join(main_path, main_folder_name, email_title)
+                    for file in os.listdir(excel_folder_path):
+                        try:
+                            excel_path = os.path.join(excel_folder_path, file)
+                            print(excel_path)
+                            # 婉怡：零售 + 过账不垫资业务
+                            if main_folder_name == '聚仁台账':
+                                # 初始化读取零售过账业务的模板
+                                excel_process = ProcessExcelRetail(sum_list)
+                                # 模板读表信息
+                                excel_process.load_excel_retail(excel_path)
+                                retail_data_inPrice, retail_data_inCharge, retail_data_count = excel_process.load_sheet_retail()
+                                unloan_data_inPrice, unloan_data_inCharge, unloan_data_count = excel_process.load_sheet_unloan()
+                                data_info = {0: {'inPrice': retail_data_inPrice,
+                                                 'inCharges': retail_data_inCharge,
+                                                 'count': retail_data_count},
+                                             2: {'inPrice': unloan_data_inPrice,
+                                                 'inCharges': unloan_data_inCharge,
+                                                 'count': unloan_data_count}}
+                                print('excel data:', data_info)
+                                # 因为是累加式的数据，所以我们需要做个减法在录入
+                                differ = calculate_differ(data_info, month_time=excel_process.month)
+                                print('after data:', differ)
+                                if int((datetime.datetime(year=int(email_title[4:8]), month=excel_process.month,
+                                                          day=1) - datetime.datetime.now()).days) > 0:
+                                    now_year = int(email_title[4:8]) - 1
+                                else:
+                                    now_year = email_title[4:8]
+                                # 插入数据
+                                MysqlAnalyzeUsage.insert_data(differ, year_time=now_year, file_name=file)
+                            # 婉怡：垫资业务
+                            elif main_folder_name == '聚仁垫资':
+                                # 初始化一个读取垫资的模板
+                                excel_process = ProcessExcelLoan(sum_list)
+                                # 模板读表
+                                excel_process.load_excel_info(folder=excel_folder_path, single_excel_name=file)
+                                # 处理数据
+                                excel_process.process_data()
+                            # 文才：垫资 + 非垫资 业务
+                            elif main_folder_name == '全联表格':
+                                # 初始化一个读取全联的模板
+                                excel_process = QuanlianExcelProcess(sum_list)
+                                excel_process.process_data(folder=excel_folder_path, single_excel_name=file)
+                        except Exception as e:
+                            print('发生错误{}'.format(e))
+                            write_down_error(str(e))
+            ruuning_time_count += 1
+            next_time = '本次扫描结束，下次扫描时间 {}'.format(datetime.datetime.now() + timedelta(minutes=7))
+            print(next_time)
+            write_down_time(next_time)
+            time.sleep(60 * 7)
+    except Exception as e:
+        print('发生未知错误，详情请看日志')
+        write_down_error('run {} times '.format(ruuning_time_count) + '\n' + str(e))
+        print('系统将在 45 分钟后重启： {}'.format(datetime.datetime.now() + timedelta(minutes=45)))
+        time.sleep(60 * 30)
+        main_job()
 
 if __name__ == '__main__':
     main_job()

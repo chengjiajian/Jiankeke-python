@@ -1,225 +1,24 @@
-from xlrd import open_workbook
-import contextlib
-import poplib
-import pymysql
-from dateutil.parser import parse
+from usages.settings import *
+from usages.email_usage import pop_usage
+from usages.mysql_usage import MysqlUsage,MysqlAnalyzeUsage,calculate_differ,get_all_info
+from usages.file_tools import *
 from email.parser import Parser
 from email.header import decode_header,Header
 from email.utils import parseaddr,formataddr
-import base64
-import datetime
-from datetime import timedelta
-import time
-import re
-import os
+from xlrd import open_workbook
 from openpyxl import load_workbook
-from decimal import *
+from datetime import timedelta
+import re
 from xlrd import xldate_as_datetime
-# 保存地址管理
-current_path = 'static'
-save_path = os.path.join(current_path, 'excel_attachment')
-# 关键字管理
-keywords1 = '骚爷台账'  # 普通台账关键字
-keywords2 = '骚爷垫资'  # 垫资关键字
-
-# 库名
-test_insert_server = 'ggcx_test'
-using_insert_server = 'ggcx'
-test_info_server = 'insurance_info_temp'
-using_info_server = 'insurance_info'
-
-# 切换 入库数据入口
-insert_server = using_insert_server
-
-# 切换 取数据的来源
-@contextlib.contextmanager
-# useraccount='17601228909@163.com'
-# useraccount='shiyugroup_cjj@163.com'
-def pop_usage(useraccount='shiyugroup_cjj@163.com', password='cjj941208', pop3_server='pop.163.com'):
-    useraccount = useraccount
-    password = password
-    # 邮件服务器地址。如果你的邮箱是163，那么可以这么写。qq的话就是pop.qq.com
-    server = poplib.POP3(pop3_server)
-    # 可选项： 打开或者关闭调试信息，1为打开，会在控制台打印客户端与服务器的交互信息
-    server.set_debuglevel(1)
-    # 可选项： 打印POP3服务器的欢迎文字，验证是否正确连接到了邮件服务器
-    print(server.getwelcome().decode('utf8'))
-    server.user(useraccount)
-    server.pass_(password)
-    try:
-        yield server
-    finally:
-        server.quit()
+from decimal import *
+import time
+from dateutil.parser import parse
 
 
-
-# 记录错误信息的方法
-def write_down_error(message):
-    with open('errorMessage.txt', 'a', encoding='utf-8') as fn:
-        fn.write('{} \n {} \n ==============================================='.format(datetime.datetime.now(), message))
-
-# 记录 扫描时间 的方法
-def write_down_time(message):
-    with open('timeMessage.txt', 'a', encoding='utf-8') as fn:
-        fn.write('{} \n {} \n ==============================================='.format(datetime.datetime.now(), message))
-
-
-
-# 解码
-def decode_base64(s, charset='utf8'):
-    return str(base64.decodebytes(s.encode(encoding=charset)), encoding=charset)
-
-
-# 连接数据库
-@contextlib.contextmanager
-def mysql(get_type='dict', host='120.55.55.19', port=3306, user='root', passwd='shiyu#2018$', db='excel_info', charset='utf8'):
-    conn = pymysql.connect(host=host, port=port, user=user, passwd=passwd, db=db, charset=charset)
-    if get_type == 'dict':
-        cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
-    else:
-        cursor = conn.cursor()
-    try:
-        yield cursor
-    finally:
-        conn.commit()
-        cursor.close()
-        conn.close()
-
-
-# 连接正式库
-@contextlib.contextmanager
-def mysql_analyze(get_type='dict', host='121.40.207.59', port=3306, user='root', passwd='MmlAN8kX', db=insert_server, charset='utf8'):
-    conn = pymysql.connect(host=host, port=port, user=user, passwd=passwd, db=db, charset=charset)
-    if get_type == 'dict':
-        cursor = conn.cursor(cursor=pymysql.cursors.DictCursor)
-    else:
-        cursor = conn.cursor()
-    try:
-        yield cursor
-    finally:
-        conn.commit()
-        cursor.close()
-        conn.close()
-
-
-# 正式库 管理
-class MysqlAnalyzeUsage:
-    def __init__(self):
-        pass
-
-    @classmethod
-    def get_info(cls, month, organization_name):
-        with mysql_analyze() as cursor:
-            sql_content = "SELECT * from insurance_analy WHERE (inType=0 OR inType=2) and month='{}' and inOrganization='{}'".format(month, organization_name)
-            c = cursor.execute(sql_content)
-            infos = cursor.fetchall()
-            return infos
-
-    @classmethod
-    def change_info(cls, strange_date, organization, type):
-        pass
-
-    # 插表  大数据 非单条
-    @classmethod
-    def insert_data(cls, data, organization_name='聚仁', year_time='2018'):
-        if data:
-            now_time = datetime.datetime.now()
-            inMonth = '{}/{}'.format(str(year_time)[-2:], data['month'])
-            state = 0
-            now_month = '{}{}'.format(year_time, data['month'])
-            now_day = now_time.strftime('%Y%m%d')
-            data.pop('month')
-            insert_list = []
-            for inType, value in data.items():
-                try:
-                    rate = Decimal(value['inCharges'] / value['inPrice']).quantize(Decimal('0.00'))
-                except Exception:
-                    rate = Decimal('0.00').quantize(Decimal('0.00'))
-                charges = value['inCharges'] if value['inCharges'] > 0 else 0
-                price = value['inPrice'] if value['inPrice'] > 0 else 0
-                if charges or price:
-                    single_info = (
-                        inMonth, organization_name, inType, price, charges, rate, now_time, state, \
-                        now_month, now_day, 0)
-                    insert_list.append(single_info)
-                else:
-                    print('两数字都为0')
-                    # if value['inCharges'] > 0:
-                    #     single_info = (
-                    #     inMonth, organization_name, inType, 0, value['inCharges'], rate, now_time, \
-                    #     state, now_month, now_day, value['count'])
-                    #     insert_list.append(single_info)
-                    # else:
-                    #     print('inCharges小于0，不录入')
-                    # if value['inPrice'] > 0:
-                    #     single_info = (
-                    #         inMonth, organization_name, inType, value['inPrice'], 0, rate, now_time, \
-                    #         state, now_month, now_day, value['count'])
-                    #     insert_list.append(single_info)
-                    # else:
-                    #     print('inPrice小于0，不录入')
-            if insert_list:
-                with mysql_analyze() as cursor:
-                    sql_content = "INSERT INTO insurance_analy(inMonth, inOrganization, inType, inPrice, inCharges, inRate\
-            , creatTime, state, month, day, countInfo) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-                    c = cursor.executemany(sql_content, insert_list)
-            else:
-                print('没有需要入库的保费/手续费数据')
-        else:
-            print('没取到数据')
-
-    # 批量 插入 单条数据
-    @classmethod
-    def insert_single_insur(cls, data_list):
-        if data_list:
-            print('正在将 {} 条保单数据数据入库'.format(len(data_list)))
-            with mysql_analyze() as cursor:
-                sql_content = "INSERT INTO insurance_info(organization, company, insuranceCompany, insuranceOrgnization, writeDate, insurancePerson,insuranceIdCard, licenseNumber, insurancePrice, insuranceRate, returnPrice, status, uid, uName, createTime, flag, type, insuranceType, insuranceName, insuranceNum, sign) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-                c = cursor.executemany(sql_content, data_list)
-        else:
-            print('没有数据可以入库')
-
-
-class MysqlUsage:
-    def __init__(self):
-        pass
-
-    @classmethod
-    def check_attachment_exist(cls, time_title):
-        print('正在查询邮件名：{} 是否已存在'.format(time_title))
-        with mysql() as cursor:
-            sql_content = "SELECT * from attachmentData WHERE emailTitle='{}'".format(time_title)
-            cursor.execute(sql_content)
-            infos = cursor.fetchall()
-        if infos:
-            print('查库结果： 已存在')
-            return False
-        return True
-
-    @classmethod
-    def insert_data(cls, time_title, file_name, email_account, email_name, email_type, origin_name):
-        with mysql() as cursor:
-            sql_content = "INSERT INTO attachmentData(email,emailName,fileName,uploadTime,emailTitle,emailType,originName) VALUES ('{}','{}','{}','{}','{}','{}','{}')".format(
-                email_account, email_name, file_name, datetime.datetime.now(), time_title, email_type, origin_name)
-            cursor.execute(sql_content)
-
-    @classmethod
-    def get_main_data(cls):
-        pass
-
-    # 从库里把 同一个邮件的Excel一起拉出来
-    @classmethod
-    def get_excel_info_from_mysql(cls, email_title):
-        with mysql(get_type='list') as cursor:
-            sql_content = "select emailType,fileName from attachmentData where emailTitle='{}'".format(
-                email_title)
-            cursor.execute(sql_content)
-            result = cursor.fetchall()
-        return result
-
-
+# 处理邮件
 class ProcessEmail:
     def __init__(self):
+        print('正在初始化邮箱')
         pass
 
     # 获取文本编码
@@ -246,9 +45,8 @@ class ProcessEmail:
             resp, mails, octets = server.list()
             total_mail_numbers = len(mails)
             current_path = 'static'
-            save_path = os.path.join(current_path, 'excel_attachment')
-            if not os.path.exists(save_path):  # 如果文件夹不存在，创建文件夹
-                os.makedirs(save_path)
+            if not os.path.exists(main_path):  # 如果文件夹不存在，创建文件夹
+                os.makedirs(main_path)
             sum_email_info = {'status': 0, 'mail_list': []}  # 记录所有 需要录的邮件信息
             # 从后往前 翻一遍邮箱
             for i in range(total_mail_numbers, 0, -1):
@@ -269,177 +67,46 @@ class ProcessEmail:
                     # 需要解码Subject字符串:
                     value = self.decode_str(title_value)
                     print('{}、这封邮件标题:'.format(i), value)
-                    # 处理 台账邮件
-                    if keywords1 == value:
-                        time_title = '{}{}'.format(keywords1, date_now)
-                        file_save_name = '台账--{}.xlsx'.format(date_now)
-                        # 检查库里情况===========================
-                        check_response = MysqlUsage.check_attachment_exist(time_title)
-                        if check_response:
-                            sum_email_info['status'] = 1
-                            # 遍历邮件内容
-                            for part in msg.walk():
-                                # 分析附件名字
-                                filename = part.get_filename()
-                                if filename:
-                                    # 文件名转码
-                                    true_file_name = self.decode_str(filename)
-                                    if 'xlsx' in true_file_name:
-                                        # 发现附件 就解析附件
-                                        data = part.get_payload(decode=True)
-                                        file_save_path = os.path.join(save_path, file_save_name)
-                                        with open(file_save_path, 'wb') as file:
-                                            file.write(data)
-                                        print('{} 下载成功'.format(true_file_name))
-                                        MysqlUsage.insert_data(time_title=time_title, file_name=file_save_name,
-                                                               email_type=0, email_account=from_address,
-                                                               email_name=from_name, origin_name=true_file_name)
-                                        sum_email_info['mail_list'].append(time_title)
-                    # 处理 垫资邮件
-                    elif keywords2 == value:
-                        time_title = '{}{}'.format(keywords2, date_now)
-                        # 检查库里情况===========================
-                        check_response = MysqlUsage.check_attachment_exist(time_title)
-                        if check_response:
-                            sum_email_info['status'] = 1
-                            # 遍历邮件内容
-                            file_count = 1  # 控制多文件的文件名
-                            for part in msg.walk():
-                                # 分析附件名字
-                                filename = part.get_filename()
-                                if filename:
-                                    # 文件名转码
-                                    true_file_name = self.decode_str(filename)
-                                    if 'xls' in true_file_name:
-                                        # 发现附件 就解析附件
-                                        data = part.get_payload(decode=True)
-                                        file_save_name = '平安垫资--{}-{}.xls'.format(date_now, file_count)
-                                        file_save_path = os.path.join(save_path, file_save_name)
-                                        with open(file_save_path, 'wb') as file:
-                                            file.write(data)
-                                        print('{} 下载成功'.format(true_file_name))
-                                        MysqlUsage.insert_data(time_title=time_title, file_name=file_save_name,
-                                                               email_type=1, email_account=from_address,
-                                                               email_name=from_name,origin_name=true_file_name)
-                                        if time_title not in sum_email_info['mail_list']:
-                                            sum_email_info['mail_list'].append(time_title)
-                                        file_count += 1
+                    for keywords in [keywords1, keywords2, keywords3]:
+                        if keywords == value:
+                            # time title是这封邮件的唯一标识 名 字
+                            time_title = '{}{}'.format(keywords, date_now)
+                            save_path = os.path.join(main_path, keywords, time_title)
+                            if not os.path.exists(save_path):  # 如果文件夹不存在，创建文件夹
+                                os.makedirs(save_path)
+                            # 检查库里情况===========================
+                            check_response = MysqlUsage.check_attachment_exist(time_title)
+                            if check_response:
+                                sum_email_info['status'] = 1
+                                # 遍历邮件内容
+                                for part in msg.walk():
+                                    # 分析附件名字
+                                    filename = part.get_filename()
+                                    if filename:
+                                        # 文件名转码
+                                        true_file_name = self.decode_str(filename)
+                                        if 'xls' in true_file_name:
+                                            # 发现附件 就解析附件
+                                            data = part.get_payload(decode=True)
+                                            with open(os.path.join(save_path, true_file_name), 'wb') as file:
+                                                file.write(data)
+                                            print('{} 下载成功'.format(true_file_name))
+                                            if keywords == keywords1:
+                                                email_type = 0
+                                            elif keywords == keywords2:
+                                                email_type = 1
+                                            elif keywords == keywords3:
+                                                email_type = 2
+                                            MysqlUsage.insert_data(time_title=time_title, file_name=true_file_name,
+                                                                   email_type=email_type, email_account=from_address,
+                                                                   email_name=from_name, origin_name=true_file_name)
+                                            if time_title not in sum_email_info['mail_list']:
+                                                sum_email_info['mail_list'].append(time_title)
+                            break
                     else:
                         message = '发现新邮件,但邮件抬头里没有台账关键字,所以跳过'
                         print(message)
         return sum_email_info
-
-    # 回信
-    def return_excel(self,to_address):
-        from email import encoders
-        from email.header import Header
-        from email.mime.text import MIMEText
-        from email.utils import parseaddr, formataddr
-        import smtplib
-
-        def _format_addr(s):
-            name, addr = parseaddr(s)
-            return formataddr(( \
-                Header(name, 'utf-8').encode(), \
-                addr.encode('utf-8') if isinstance(addr, unicode) else addr))
-
-        from_addr = 'shiyugroup_cjj@163.com'
-        password = raw_input('Password: ')
-        to_addr = raw_input('To: ')
-        smtp_server = raw_input('SMTP server: ')
-
-        msg = MIMEText('hello, send by Python...', 'plain', 'utf-8')
-        msg['From'] = _format_addr(u'Python爱好者 <%s>' % from_addr)
-        msg['To'] = _format_addr(u'管理员 <%s>' % to_addr)
-        msg['Subject'] = Header(u'来自SMTP的问候……', 'utf-8').encode()
-
-        server = smtplib.SMTP(smtp_server, 25)
-        server.set_debuglevel(1)
-        server.login(from_addr, password)
-        server.sendmail(from_addr, [to_addr], msg.as_string())
-        server.quit()
-
-    # 格式化输出
-    def print_info(self, msg):
-            # 邮件的From, To, Subject存在于根对象上:
-        value = msg.get('Subject', '')
-        if value:
-            # 需要解码Subject字符串:
-            value = self.decode_str(value)
-
-        content_type = msg.get_content_type()
-        if content_type == 'multipart/mixed':
-            print(content_type)
-            pass
-        # if (msg.is_multipart()):
-        #     # 如果邮件对象是一个MIMEMultipart,
-        #     # get_payload()返回list，包含所有的子对象:
-        #     parts = msg.get_payload()
-        #     for n, part in enumerate(parts):
-        #         print('%spart %s' % ('  ' * indent, n))
-        #         print('%s--------------------' % ('  ' * indent))
-        #         # 递归打印每一个子对象:
-        #         self.print_info(part, indent + 1)
-        # else:
-        #     # 邮件对象不是一个MIMEMultipart,
-        #     # 就根据content_type判断:
-            # if content_type == 'text/plain' or content_type == 'text/html':
-            #     # 纯文本或HTML内容:
-            #     content = msg.get_payload(decode=True)
-            #     # 要检测文本编码:
-            #     charset = self.guess_charset(msg)
-            #     if charset:
-            #         content = content.decode(charset)
-            #     print('%sText: %s' % ('  ' * indent, content + '...'))
-            # else:
-            #     print(content_type)
-            #     # 不是文本,作为附件处理:
-            #     print('%sAttachment: %s' % ('  ' * indent, content_type))
-
-
-# 计算差价
-def calculate_differ(now_data_dict, month_time):
-    now_time = datetime.datetime.now()
-    now_year = now_time.year
-    now_month = month_time if month_time > 10 else '0{}'.format(month_time)
-    strange_date = '{}{}'.format(now_year, now_month)
-    info = MysqlAnalyzeUsage.get_info(month=strange_date, organization_name='聚仁')
-    # 如果当月有数据
-    if info:
-        print('data exist')
-        data_dict = {'month': now_month,
-                     0: {'inPrice': 0,
-                         'inCharges': 0},
-                     2: {'inPrice': 0,
-                         'inCharges': 0}
-                     }
-        for i in info:
-            data_dict[i['inType']]['inPrice'] += i['inPrice']
-            data_dict[i['inType']]['inCharges'] += i['inCharges']
-            #data_dict[i['inType']]['count'] += i['countInfo']
-        for i in [0, 2]:
-            data_dict[i]['inPrice']  = now_data_dict[i]['inPrice'] - data_dict[i]['inPrice']
-            data_dict[i]['inCharges'] = now_data_dict[i]['inCharges'] - data_dict[i]['inCharges']
-            #data_dict[i]['count'] = now_data_dict[i]['count'] - data_dict[i]['count']
-        return data_dict
-    # 当月没有数据的话，直接入金额
-    else:
-        print('new month')
-        now_data_dict['month'] = now_month
-        return now_data_dict
-
-
-#  查询 已有保单信息，避免重复入库
-def get_all_info():
-    print('正在获取 数据库里 所有保单信息')
-    time_before = datetime.datetime.now()
-    with mysql_analyze(get_type='list') as cursor:
-        sql_content = 'select distinct writeDate,insurancePrice,insuranceNum from insurance_info'
-        cursor.execute(sql_content)
-        result = cursor.fetchall()
-    time_after = datetime.datetime.now()
-    print('总数据查询 用时 {}秒'.format((time_after-time_before).seconds))
-    return list(result)
 
 
 # 处理零售业务
@@ -522,6 +189,7 @@ class ProcessExcelRetail:
         flag = 1
         type_flag = 2
         sign = str(int(time.time()*1000))
+        cationSign = 'ADCH{}SH24'.format(sign)
         print('开始处理子信息')
         for i in range(head_row + 1, sheet.nrows):
             row_value = sheet.row_values(i)
@@ -532,7 +200,11 @@ class ProcessExcelRetail:
                 insuranceCompany = row_value[insur_type_column]
                 company = company_name_dict[insuranceCompany]
                 insuranceOrgnization = '四川聚仁保险代理有限公司'
-                writeDate = xldate_as_datetime(row_value[sign_date_column],0)
+               # print(row_value[sign_date_column])
+                try:
+                    writeDate = xldate_as_datetime(row_value[sign_date_column],0)
+                except Exception:
+                    writeDate = xldate_as_datetime(row_value[sign_date_column-1],0)
                 insurancePerson = row_value[owner_name_column]
                 insuranceIdCard = row_value[id_num_column]
                 licenseNumber = row_value[plate_num_column]
@@ -544,8 +216,8 @@ class ProcessExcelRetail:
                         comm_rate  = Decimal(row_value[comm_rate_column]).quantize(Decimal('0.00')) if row_value[comm_rate_column] else Decimal(0)
                         comm_income = row_value[comm_income_column]
                         insuranceType = 2
-                        insuranceName = '机动车商业行业示范汽车保险'
-                        single_info = (organization, company, insuranceCompany, insuranceOrgnization, writeDate, insurancePerson, insuranceIdCard, licenseNumber, comm_price, comm_rate, comm_income, status, uid, uName, createTime, flag, type_flag, insuranceType, insuranceName, comm_num, sign)
+                        insuranceName = '商业险'
+                        single_info = (organization, company, insuranceCompany, insuranceOrgnization, writeDate, insurancePerson, insuranceIdCard, licenseNumber, comm_price, comm_rate, comm_income, status, uid, uName, createTime, flag, type_flag, insuranceType, insuranceName, comm_num, sign, cationSign, comm_price, comm_rate, 0, 1)
                         self.insurance_list.append((writeDate, comm_price, comm_num))
                         insurance_info_insert_list.append(single_info)
                 if comp_num:
@@ -555,7 +227,7 @@ class ProcessExcelRetail:
                         comp_income = row_value[comp_income_column]
                         insuranceType = 1
                         insuranceName = '交强险'
-                        single_info = (organization, company, insuranceCompany, insuranceOrgnization, writeDate, insurancePerson, insuranceIdCard, licenseNumber, comp_price, comp_rate, comp_income, status, uid, uName, createTime, flag, type_flag, insuranceType, insuranceName, comp_num, sign)
+                        single_info = (organization, company, insuranceCompany, insuranceOrgnization, writeDate, insurancePerson, insuranceIdCard, licenseNumber, comp_price, comp_rate, comp_income, status, uid, uName, createTime, flag, type_flag, insuranceType, insuranceName, comp_num, sign, cationSign, comp_price, comp_rate, 0, 1)
                         self.insurance_list.append((writeDate, comp_price, comp_num))
                         insurance_info_insert_list.append(single_info)
                 # 前端数据处理
@@ -614,9 +286,10 @@ class ProcessExcelLoan:
     def __init__(self, insurance_list):
         self.insurance_list = insurance_list
 
-    def load_excel_info(self, excelName):
-        excel = open_workbook(excelName)
+    def load_excel_info(self, folder, single_excel_name):
+        excel = open_workbook(os.path.join(folder,single_excel_name))
         self.sheet = excel.sheet_by_index(0)
+        self.excel_name = single_excel_name
 
     def process_data(self):
         head_row = ''
@@ -627,6 +300,7 @@ class ProcessExcelLoan:
         flag = 1
         type_flag = 1
         sign = str(int(time.time() * 1000))
+        cationSign = 'ADCH{}SH24'.format(sign)
         organization = '四川聚仁'
         company = '平安保险'
         insuranceCompany = '平安'
@@ -665,9 +339,7 @@ class ProcessExcelLoan:
                 additional_info = row_value[additional_info_column]
                 if (writeDate, insur_sum_price, insur_num) not in self.insurance_list:
                     single_info = (
-                    organization, company, insuranceCompany, insuranceOrgnization, writeDate, owner_name, '', '',
-                    insur_sum_price, rate, income, status, uid, uName, createTime, flag, type_flag, insuranceType,
-                    insuranceName, insur_num, sign)
+                    organization, company, insuranceCompany, insuranceOrgnization, writeDate, owner_name, '', '',insur_sum_price, rate, income, status, uid, uName, createTime, flag, type_flag, insuranceType,insuranceName, insur_num, sign, cationSign, income, rate, 1, 1)
                     self.insurance_list.append((writeDate, insur_sum_price, insur_num))
                     insurance_info_insert_list.append(single_info)
             elif '支付申请号生成日期:' in row_value:
@@ -698,68 +370,349 @@ class ProcessExcelLoan:
             data_dict = {'month': month_date,
                          1: {'inPrice': loan_insur_price,
                              'inCharges': loan_income}}
-            MysqlAnalyzeUsage.insert_data(data_dict, year_time=year_date)
+            MysqlAnalyzeUsage.insert_data(data_dict, year_time=year_date,file_name=self.excel_name)
+
+
+# 处理全联文件
+class QuanlianExcelProcess:
+    def __init__(self, insurance_list):
+        self.insurance_type_dict = {
+            'C00': '商业险',
+            'C01': '商业险',
+            'C51': '交强险',
+            'C50': '交强险',
+            'DAA': '商业险',
+            'ZDM': '诉讼财产保全责任保险',
+            'YEL': '货运险',
+            'YDL': '国内联运货运险',
+            'ZBV': '货运险',
+            'YDG': '货运险',
+            'AAN': '通用航空保险',
+            'EAU': '驾乘人员意外',
+            'EDD': '驾驶人意外',
+            'PL0700231': '职业责任险',
+            'PL03J0092': '意外住院补贴',
+            'PL03Y0251': '驾乘人员意外',
+            'PL03Y0273': '法定节假日驾乘人员意外',
+            'PL03Y0006': '驾驶人意外',
+            'PL03J0003': '意外医疗',
+            'PL03J0043': '意外住院收入',
+            'PL03Y0111': '个人意外',
+            'PL03Y0162': '交通意外',
+            'PL03Y0336': '个人法律补偿',
+            'GAHI': '阳光人寿附加团体意外伤害住院津贴医疗保险',
+            'GADD01': '阳光人寿和泰团体意外伤害保险',
+            'GAMR': '阳光人寿附加团体意外伤害医疗保险',
+            '商业险': '商业险',
+            '交强险': '交强险'}
+        self.insurance_list = insurance_list
+        self.header_dict = {
+            '合肥人保': {
+                'sheet_index': 0,
+                'company': '人保',
+                'insuranceCompany': '合肥人保',
+                'header_feature': '结算单号',
+                'insur_num_name': '业务号',
+                'insur_type_name': '险种',
+                'owner_name_name': '投保人',
+                'insur_sum_price_name': '实收保费',
+                'rate_name': '基本佣金比例',
+                'income_name': '应付佣金金额',
+                'end_feature': '',
+                'calculate_rate': 1},
+            '滁州平安': {
+                'sheet_index': 0,
+                'company': '平安保险',
+                'insuranceCompany': '滁州平安',
+                'header_feature': '保单号',
+                'insur_num_name': '保单号',
+                'insur_type_name': '险种',
+                'owner_name_name': '客户',
+                'insur_sum_price_name': '保费收入',
+                'rate_name': '本次比例%',
+                'income_name': '本次手续费/经纪费(人民币)',
+                'end_feature': '领导审批:',
+                'calculate_rate': 0.99},
+            '宁波阳光': {
+                'sheet_index': 1,
+                'company': '阳光保险',
+                'insuranceCompany': '宁波阳光',
+                'header_feature': '保单号',
+                'insur_num_name': '保单号',
+                'insur_type_name': '险种代码',
+                'owner_name_name': '客户名称',
+                'insur_sum_price_name': '保险费',
+                'rate_name': '手续费比例',
+                'income_name': '手续费',
+                'end_feature': '合计',
+                'calculate_rate': 0.985},
+            '杭州阳光': {
+                'sheet_index': 0,
+                'company': '阳光保险',
+                'insuranceCompany': '杭州阳光',
+                'header_feature': '签单日期',
+                'insur_num_name': '保单号/批单号',
+                'insur_type_name': '险种',
+                'owner_name_name': '被保险人',
+                'insur_sum_price_name': '不含税保费',
+                'rate_name': '经纪费率',
+                'income_name': '经纪费金额',
+                'end_feature': '',
+                'calculate_rate': 0.99}
+        }
+
+    def process_data(self, folder, single_excel_name):
+        print('正在检测文件：{}'.format(single_excel_name))
+        date_info = re.findall(re.compile('20\d{6}'), single_excel_name)
+        if date_info:
+            date_info = date_info[0]
+            file_path = os.path.join(folder, single_excel_name)
+            uName = 'cjj_python'
+            uid = 8
+            flag = 1
+            status = 2
+            type_flag = 1
+            createTime = datetime.datetime.now()
+            organization = '全联'
+            insuranceOrgnization = '全联保险经纪有限公司'
+            insurance_info_insert_list = []
+            total_dict = {}
+            year_date = date_info[:4]
+            month_date = date_info[4:6]
+            day_date = date_info[-2:]
+            head_row = ''
+            #print(self.header_dict)
+            # 垫资 逻辑处理
+            if '非垫资' not in single_excel_name and re.findall(re.compile('.xls$'), single_excel_name):
+                data_type = 1
+                for insurance_company_name, value in self.header_dict.items():
+                    if insurance_company_name in single_excel_name:
+                        sign = str(int(time.time() * 1000))
+                        cationSign = 'ADCH{}SH24'.format(sign)
+                        ratio_info_dict = MysqlAnalyzeUsage.get_ratio_info(company_name=insurance_company_name)
+                        payRatio, incomeRatio = (1, 1)
+                        if ratio_info_dict:
+                            ratio_info_dict = ratio_info_dict[0]
+                            payRatio, incomeRatio = ratio_info_dict['payRatio'], ratio_info_dict['incomeRatio']
+                        company = value['company']
+                        insuranceCompany = value['insuranceCompany']
+                        excel = open_workbook(file_path)
+                        sheet = excel.sheet_by_index(value['sheet_index'])
+                        policyCount = 0
+                        amount = 0
+                        advance = 0
+                        for i in range(0, sheet.nrows):
+                            row_value = sheet.row_values(i)
+                            if row_value[0] == value['end_feature']:
+                                print('{} 已到最后一行'.format(insurance_company_name))
+                                break
+                            elif head_row:
+                                writeDate = parse('{}/{}/{}'.format(year_date, month_date, day_date))
+                                date_format = writeDate.strftime("%Y-%m")
+                                if date_format not in total_dict:
+                                    total_dict[date_format] = {'loan_insur_price': 0,
+                                                               'loan_income': 0}
+                                insur_num = row_value[insur_num_column]
+                                insur_code_type = row_value[insur_type_column]
+                                if insur_code_type in self.insurance_type_dict:
+                                    insuranceName = self.insurance_type_dict[insur_code_type]
+                                    if insuranceName == '商业险':
+                                        insuranceType = '2'
+                                    elif insuranceName == '交强险':
+                                        insuranceType = '1'
+                                    else:
+                                        insuranceType = '3'
+                                else:
+                                    insuranceType = '3'
+                                    insuranceName = insur_code_type
+                                owner_name = row_value[owner_name_column]
+                                insur_sum_price = Decimal(row_value[insur_sum_price_column]).quantize(
+                                    Decimal('0.00'))
+                                income = Decimal(row_value[income_column]).quantize(Decimal('0.00'))
+                                amount += income
+                                advance += income * payRatio
+                                total_dict[date_format]['loan_insur_price'] += insur_sum_price
+                                total_dict[date_format]['loan_income'] += income * Decimal(incomeRatio)
+                                rate = Decimal(row_value[rate_column]).quantize(Decimal('0.00'))
+                                policyCount += 1
+                                if (writeDate, insur_sum_price, insur_num) not in self.insurance_list:
+                                    single_info = (
+                                        organization, company, insuranceCompany, insuranceOrgnization,
+                                        writeDate, owner_name,
+                                        '', '',
+                                        insur_sum_price, rate, income, status, uid, uName, createTime, flag,
+                                        type_flag,
+                                        insuranceType,
+                                        insuranceName, insur_num, sign, cationSign, income*payRatio, payRatio, 1, 1)
+                                    self.insurance_list.append((writeDate, insur_sum_price, insur_num))
+                                    insurance_info_insert_list.append(single_info)
+                            elif value['header_feature'] in row_value:
+                                insur_num_column = row_value.index(value['insur_num_name'])
+                                insur_type_column = row_value.index(value['insur_type_name'])
+                                owner_name_column = row_value.index(value['owner_name_name'])
+                                insur_sum_price_column = row_value.index(value['insur_sum_price_name'])
+                                rate_column = row_value.index(value['rate_name'])
+                                income_column = row_value.index(value['income_name'])
+                                head_row = 1
+                        cationDate = datetime.datetime.now().strftime('%Y-%m-%d')
+                        advance_insert_list = [(cationDate, organization, company, cationSign, amount, policyCount, advance, 1), ]
+                        MysqlAnalyzeUsage.insert_loan_info(advance_insert_list)
+                        break
+            # 非 垫资 逻辑处理
+            elif '非垫资' in single_excel_name and '众安' in single_excel_name and re.findall(re.compile('.xlsx$'), single_excel_name):
+                print('众安保险')
+                sign = str(int(time.time() * 1000))
+                cationSign = 'ADCH{}SH24'.format(sign)
+                data_type = 2
+                company = '众安保险'
+                insuranceCompany = '众安保险'
+                excel = load_workbook(file_path, data_only=True)
+                sheet1, sheet2 = excel[excel.sheetnames[0]], excel[excel.sheetnames[1]]
+                sheet_list = [[cell.value for cell in i] for i in sheet1.iter_rows()]
+                true_income_value = float(sheet2.cell(row=2, column=1).value)
+                rows = len(sheet_list)
+                for i in range(rows):
+                    row_value = sheet_list[i]
+                    if row_value[0] == '':
+                        print('{} 已到最后一行'.format(single_excel_name))
+                        break
+                    elif head_row:
+                        writeDate = parse('{}/{}/{}'.format(year_date, month_date, day_date))
+                        date_format = writeDate.strftime("%Y-%m")
+                        if date_format not in total_dict:
+                            total_dict[date_format] = {'loan_insur_price': 0,
+                                                       'loan_income': 0}
+                        total_dict[date_format]['loan_income'] = true_income_value
+                        insur_num = row_value[insur_num_column]
+                        insur_code_type = row_value[insur_type_column]
+                        if insur_code_type in self.insurance_type_dict:
+                            insuranceName = self.insurance_type_dict[insur_code_type]
+                            if insuranceName == '商业险':
+                                insuranceType = '2'
+                            elif insuranceName == '交强险':
+                                insuranceType = '1'
+                            else:
+                                insuranceType = '3'
+                        else:
+                            insuranceType = '3'
+                            insuranceName = insur_code_type
+                        owner_name = row_value[owner_name_column]
+                        comm_price = row_value[comm_price_column] if row_value[comm_price_column] else 0
+                        comp_price = row_value[comp_price_column] if row_value[comp_price_column] else 0
+                        income_price = row_value[income_column] if row_value[income_column] else 0
+                        insur_sum_price = Decimal(comm_price + comp_price).quantize(Decimal('0.00'))
+                        income = Decimal(income_price).quantize(Decimal('0.00'))
+                        total_dict[date_format]['loan_insur_price'] += insur_sum_price
+                        # total_dict[date_format]['loan_income'] += income   众安无法按照单条累积 计算总的佣金，先注释预留
+                        rate = Decimal(income / insur_sum_price).quantize(Decimal('0.00')) if insur_sum_price != 0 else 0
+                        if (writeDate, insur_sum_price, insur_num) not in self.insurance_list:
+                            single_info = (
+                                organization, company, insuranceCompany, insuranceOrgnization,
+                                writeDate, owner_name,
+                                '', '',
+                                insur_sum_price, rate, income, status, uid, uName, createTime, flag,
+                                type_flag,
+                                insuranceType,
+                                insuranceName, insur_num, sign, cationSign, 0, 0, 2, 0)
+                            self.insurance_list.append((writeDate, insur_sum_price, insur_num))
+                            insurance_info_insert_list.append(single_info)
+                    elif '保单号' in row_value:
+                        insur_num_column = row_value.index('保单号')
+                        insur_type_column = row_value.index('险种')
+                        owner_name_column = row_value.index('投保人')
+                        comm_price_column = row_value.index('商业险签单保费（元）')
+                        comp_price_column = row_value.index('交强险保费（元）')
+                        #insur_sum_price_column = row_value.index(value['insur_sum_price_name'])
+                        #rate_column = row_value.index(value['rate_name'])
+                        income_column = row_value.index('费用（元）')
+                        head_row = 1
+            if total_dict:
+                for month_date_format, value in total_dict.items():
+                    print(month_date_format, value)
+                    year_date, month_date = month_date_format.split('-')
+                    loan_insur_price = Decimal(value['loan_insur_price'] / 10000).quantize(Decimal('0.000000'))
+                    loan_income = Decimal(value['loan_income'] / 10000).quantize(Decimal('0.000000'))
+                    data_dict = {'month': month_date,
+                                 data_type: {'inPrice': loan_insur_price,
+                                             'inCharges': loan_income}}
+                    MysqlAnalyzeUsage.insert_data(data_dict, organization_name='狮域全联', year_time=year_date, file_name=single_excel_name)
+            # 插 单条库操作
+            MysqlAnalyzeUsage.insert_single_insur(insurance_info_insert_list)
+        else:
+            print('文件名日期格式出错')
 
 
 # 主任务流程
 def main_job():
-    try:
-        write_down_error('开始执行主任务')
-        ruuning_time_count = 0
-        sum_list = get_all_info()
-        while True:
-            mail = ProcessEmail()
-            email_info = mail.get_excel_from_email()
-            print(email_info)
-            # print(sum_list)
-            if email_info['status'] == 1:
-                for email_title in email_info['mail_list']:
-                    c = MysqlUsage.get_excel_info_from_mysql(email_title)
-                    for excel_type, excel_name in c:
-                        excel_path = os.path.join(save_path, excel_name)
-                        print(excel_path)
-                        # 零售 + 过账不垫资业务
-                        if excel_type == 0:
-                            print(excel_name, '====零售 + 过账不垫资业务')
-                            # 初始化读取零售过账业务的模板
-                            excel_process = ProcessExcelRetail(sum_list)
-                            # 模板读表信息
-                            excel_process.load_excel_retail(excel_path)
-                            retail_data_inPrice, retail_data_inCharge, retail_data_count = excel_process.load_sheet_retail()
-                            unloan_data_inPrice, unloan_data_inCharge, unloan_data_count = excel_process.load_sheet_unloan()
-                            data_info = {0: {'inPrice': retail_data_inPrice,
-                                             'inCharges': retail_data_inCharge,
-                                             'count': retail_data_count},
-                                         2: {'inPrice': unloan_data_inPrice,
-                                             'inCharges': unloan_data_inCharge,
-                                             'count': unloan_data_count}}
-                            print('excel data:', data_info)
-                            # 因为是累加式的数据，所以我们需要做个减法在录入
-                            differ = calculate_differ(data_info, month_time=excel_process.month)
-                            print('after data:', differ)
-                            # 插入数据
-                            MysqlAnalyzeUsage.insert_data(differ)
-                        # 垫资业务
-                        elif excel_type == 1:
-                            print(excel_name, '====垫资业务')
-                            # 初始化一个读取垫资的模板
-                            excel_process = ProcessExcelLoan(sum_list)
-                            # 模板读表
-                            excel_process.load_excel_info(excel_path)
-                            # 处理数据
-                            excel_process.process_data()
-            ruuning_time_count += 1
-            next_time = '本次扫描结束，下次扫描时间 {}'.format(datetime.datetime.now() + timedelta(minutes=5))
-            print(next_time)
-            write_down_time(next_time)
-            time.sleep(60 * 5)
-    except Exception as e:
-        print('发生未知错误，详情请看日志')
-        write_down_error('run {} times '.format(ruuning_time_count) + '\n' + str(e))
-        print('系统将在1小时后重启： {}'.format(datetime.datetime.now() + timedelta(minutes=60)))
-        time.sleep(60 * 60)
-        main_job()
-
+# try:
+    write_down_error('开始执行主任务')
+    ruuning_time_count = 0
+    sum_list = get_all_info()
+    while True:
+        mail = ProcessEmail()
+        email_info = mail.get_excel_from_email()
+        print(email_info)
+        # print(sum_list)
+        if email_info['status'] == 1:
+            for email_title in email_info['mail_list']:
+                # 切片取 email的 前四位 来区分业务情况
+                main_folder_name = email_title[:4]
+                excel_folder_path = os.path.join(main_path, main_folder_name, email_title)
+                for file in os.listdir(excel_folder_path):
+                # try:
+                    excel_path = os.path.join(excel_folder_path, file)
+                    print(excel_path)
+                    # 婉怡：零售 + 过账不垫资业务
+                    if main_folder_name == '聚仁台账':
+                        # 初始化读取零售过账业务的模板
+                        excel_process = ProcessExcelRetail(sum_list)
+                        # 模板读表信息
+                        excel_process.load_excel_retail(excel_path)
+                        retail_data_inPrice, retail_data_inCharge, retail_data_count = excel_process.load_sheet_retail()
+                        unloan_data_inPrice, unloan_data_inCharge, unloan_data_count = excel_process.load_sheet_unloan()
+                        data_info = {0: {'inPrice': retail_data_inPrice,
+                                         'inCharges': retail_data_inCharge,
+                                         'count': retail_data_count},
+                                     2: {'inPrice': unloan_data_inPrice,
+                                         'inCharges': unloan_data_inCharge,
+                                         'count': unloan_data_count}}
+                        print('excel data:', data_info)
+                        # 因为是累加式的数据，所以我们需要做个减法在录入
+                        differ = calculate_differ(data_info, month_time=excel_process.month)
+                        print('after data:', differ)
+                        if int((datetime.datetime(year=int(email_title[4:8]), month=excel_process.month,
+                                                  day=1) - datetime.datetime.now()).days) > 0:
+                            now_year = int(email_title[4:8]) - 1
+                        else:
+                            now_year = email_title[4:8]
+                        # 插入数据
+                        MysqlAnalyzeUsage.insert_data(differ, year_time=now_year, file_name=file)
+                    # 婉怡：垫资业务
+                    elif main_folder_name == '聚仁垫资':
+                        # 初始化一个读取垫资的模板
+                        excel_process = ProcessExcelLoan(sum_list)
+                        # 模板读表
+                        excel_process.load_excel_info(folder=excel_folder_path, single_excel_name=file)
+                        # 处理数据
+                        excel_process.process_data()
+                    # 文才：垫资 + 非垫资 业务
+                    elif main_folder_name == '全联表格':
+                        # 初始化一个读取全联的模板
+                        excel_process = QuanlianExcelProcess(sum_list)
+                        excel_process.process_data(folder=excel_folder_path, single_excel_name=file)
+                # except Exception as e:
+                #     write_down_error('******************************出错excel：{}'.format(excel_path) + '\n' + str(e))
+        ruuning_time_count += 1
+        next_time = '本次扫描结束，下次扫描时间 {}'.format(datetime.datetime.now() + timedelta(minutes=7))
+        print(next_time)
+        write_down_time(next_time)
+        time.sleep(60 * 7)
+# except Exception as e:
+#     print('发生未知错误，详情请看日志')
+#     write_down_error('run {} times '.format(ruuning_time_count) + '\n' + str(e))
+#     print('系统将在 45 分钟后重启： {}'.format(datetime.datetime.now() + timedelta(minutes=45)))
+#     time.sleep(60 * 30)
+#     main_job()
 
 if __name__ == '__main__':
     main_job()

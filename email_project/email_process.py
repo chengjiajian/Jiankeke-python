@@ -72,7 +72,7 @@ class ProcessEmail:
                         # 需要解码Subject字符串:
                         value = self.decode_str(title_value)
                         print('{}、这封邮件标题:'.format(i), value)
-                        for keywords in [keywords1, keywords2, keywords3]:
+                        for keywords in [keywords1, keywords2, keywords3, keywords4]:
                             if keywords == value:
                                 # time title是这封邮件的唯一标识 名 字
                                 time_title = '{}{}'.format(keywords, date_now)
@@ -102,6 +102,8 @@ class ProcessEmail:
                                                     email_type = 1
                                                 elif keywords == keywords3:
                                                     email_type = 2
+                                                elif keywords == keywords4:
+                                                    email_type = 3
                                                 MysqlUsage.insert_data(time_title=time_title, file_name=true_file_name,
                                                                        email_type=email_type,
                                                                        email_account=from_address,
@@ -119,7 +121,7 @@ class ProcessEmail:
 
 # 处理零售业务
 class ProcessExcelRetail:
-    def __init__(self, insurance_list,sign):
+    def __init__(self, insurance_list, sign):
         self.insurance_list = insurance_list
         self.sign = sign
     # 读取 零售和过账不垫资 表格
@@ -855,6 +857,134 @@ class QuanlianExcelProcess:
             print('文件名日期格式出错')
 
 
+# 处理批增业务
+class processAdditionalMoney():
+    def __init__(self):
+        import collections
+        self.header_dict = collections.OrderedDict()
+        self.header_dict['投放金额'] = {
+                'company': '平安保险',
+                'insuranceCompany': '平安',
+                'organization': 'sy_dt',
+                'ownerName': '车主',
+                'returnPrice': "投放金额",
+                'mark': ['投放', '投放项目'],
+                'price_offset': 0,
+                'end_feature_list': ['', None]}
+        self.header_dict['佣金跟单比例'] = {
+                'company': '人民保险',
+                'insuranceCompany': '人保',
+                'organization': '全联',
+                'ownerName': '投保人',
+                'returnPrice': "佣金",
+                'mark': ['归属机构', ],
+                "price_offset": -1,
+                'end_feature_list': ['合计:', '合计', '', None]}
+        self.header_dict['单价/小时'] = {
+            'company': '平安保险',
+            'insuranceCompany': '平安',
+            'organization': '狮域',
+            'ownerName': '姓名',
+            'returnPrice': "金额",
+            'mark': ['服务名称', ],
+            "price_offset": -1,
+            'end_feature_list': ['合计:', '合计', '', None]}
+        self.header_dict['金额'] = {
+            'company': '国寿保险',
+            'insuranceCompany': '国寿',
+            'organization': '狮域',
+            'ownerName': '序号',
+            'returnPrice': "金额",
+            'mark': ['车架号', ],
+            "price_offset": -1,
+            'end_feature_list': ['合计:', '合计', '', None]}
+
+    def processExcel(self, sheet_list, cationNumber, states=5):
+        # 常量
+        row_count = 0
+        amount_count = 0
+        uName = 'cjj_python_additional'
+        uid = 8
+        flag = 1
+        status = 2
+        type_flag = 1
+        nesstype = 2
+        postpone = 2
+        head_row = ''
+        insert_list = []  # 录入列表
+
+        # 预设量
+        ownerName_column = 0
+        returnPrice_column = 0
+        mark_column = 0
+        price_offset = 0
+        end_feature_list = ['', ]
+        for row_value in sheet_list:
+            # 监测是否到最后一行
+            if row_value[0] in end_feature_list:
+                break
+            # 标题已确定
+            elif head_row:
+                ownerName = row_value[ownerName_column]
+                returnPrice = round(row_value[returnPrice_column + price_offset], 2)
+                row_count += 1
+                amount_count += returnPrice
+                mark = "" if mark_column == 0 else row_value[mark_column]
+                detail_list = [company, insuranceCompany, organization, ownerName, returnPrice, mark, uName, uid, flag, status, type_flag, nesstype, states, postpone, cationNumber]  # 详细信息
+                insert_list.append(detail_list)  # 插表 的 列表
+            # 标题还未确定时
+            elif not head_row:
+                for head, value in self.header_dict.items():
+                    if head in row_value:
+                        company = value['company']
+                        insuranceCompany = value['insuranceCompany']
+                        organization = value['organization']
+                        ownerName_column = row_value.index(value['ownerName'])
+                        returnPrice_column = row_value.index(value['returnPrice'])
+                        price_offset = value['price_offset']
+                        end_feature_list = value['end_feature_list']
+                        for mark in value['mark']:
+                            if mark in row_value:
+                                mark_column = row_value.index(mark)
+                                break
+                        head_row = 1
+                        break
+        #print(insert_list)
+        MysqlAnalyzeUsage.insert_additional_detail(insert_list)
+        return (row_count,amount_count)
+
+    def getExcel(self, excel_path):
+        pure_file_name, excel_type = os.path.splitext(os.path.split(excel_path)[1])
+        cationNumber = re.findall('SYCX[0-9]{13}', pure_file_name)
+        money_count = 0
+        promt_count = 0
+        if cationNumber:
+            cationNumber = cationNumber[0]
+            states = MysqlAnalyzeUsage.get_state_from_advance(cationNumber)
+            if excel_type == '.xls':
+                excel = open_workbook(excel_path)
+                sheetNames = excel.sheet_names()
+                for sheetName in sheetNames:
+                    sheet = excel.sheet_by_name(sheetName)
+                    sheet_list = [sheet.row_values(i) for i in range(sheet.nrows)]
+                    row_count, amount_count = self.processExcel(sheet_list, cationNumber, states)
+                    money_count += amount_count
+                    promt_count += row_count
+            elif excel_type == '.xlsx':
+                excel = load_workbook(excel_path, data_only=True)
+                sheetNames = excel.sheetnames
+                for sheetName in sheetNames:
+                    sheet = excel[sheetName]
+                    sheet_list = [[cell.value for cell in i] for i in sheet.iter_rows()]
+                    row_count, amount_count = self.processExcel(sheet_list, cationNumber, states)
+                    money_count += amount_count
+                    promt_count += row_count
+            MysqlAnalyzeUsage.update_advance_counts(promt_count,money_count,cationNumber)
+            return True
+        else:
+            return False
+
+
 # 主任务流程
 def main_job():
     try:
@@ -875,7 +1005,10 @@ def main_job():
                     for file in os.listdir(excel_folder_path):
                         try:
                             excel_path = os.path.join(excel_folder_path, file)
-                            print(excel_path)
+                            # print(excel_path)
+                            # print(main_folder_name)
+                            # print(file)
+                            # input('')
                             # 婉怡：零售 + 过账不垫资业务
                             if main_folder_name == '聚仁台账':
                                 # 初始化读取零售过账业务的模板
@@ -914,10 +1047,13 @@ def main_job():
                                 # 初始化一个读取全联的模板
                                 excel_process = QuanlianExcelProcess(sum_list, sign)
                                 excel_process.process_data(folder=excel_folder_path, single_excel_name=file)
+                            elif main_folder_name == '批增表格':
+                                excel_process = processAdditionalMoney()
+                                excel_process.getExcel(excel_path)
                         except Exception as e:
                             if '聚仁' in main_folder_name:
                                 sendsSMS(phone=juren_phone)
-                            elif '全联' in main_folder_name:
+                            elif '全联' in main_folder_name or '批增' in main_folder_name:
                                 sendsSMS(phone=quanlian_phone)
                             sendsSMS()
                             print('发生错误{}--{}'.format(e,file))
@@ -936,6 +1072,5 @@ def main_job():
         time.sleep(60 * 30)
         main_job()
 
-# test commit
 if __name__ == '__main__':
     main_job()

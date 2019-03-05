@@ -862,7 +862,25 @@ class processAdditionalMoney():
     def __init__(self):
         import collections
         self.header_dict = collections.OrderedDict()
-        self.header_dict['投放金额'] = {
+        self.header_dict['手续费(CNY)'] = {
+            'company': '国寿保险',
+            'insuranceCompany': '国寿',
+            'organization': '师域光华',
+            'ownerName': '投保人',
+            'returnPrice': "手续费(CNY)",
+            'mark': ['险种名称', ],
+            "price_offset": 0,
+            'end_feature_list': ['合计：', '合计:', '合计', '', None]}
+        self.header_dict['保批单号'] = {
+            'company': '阳光保险',
+            'insuranceCompany': '阳光',
+            'organization': '师域',
+            'ownerName': '车牌号',
+            'returnPrice': "金额",
+            'mark': ['保批单号', ],
+            "price_offset": 0,
+            'end_feature_list': ['合计：', '总计:', '合计', '', None]}
+        self.header_dict['投放金额'] = {#车主	车架号	手机号	投放项目	投放时间	投放金额，
                 'company': '平安保险',
                 'insuranceCompany': '平安',
                 'organization': 'sy_dt',
@@ -871,7 +889,7 @@ class processAdditionalMoney():
                 'mark': ['投放', '投放项目'],
                 'price_offset': 0,
                 'end_feature_list': ['', None]}
-        self.header_dict['佣金跟单比例'] = {
+        self.header_dict['佣金跟单比例'] = {#序号	结算单号	业务号	归属机构	交叉销售机构	险种	币别	实收保费	佣金跟单比例			佣金	基本佣金比例	基本佣金	职级佣金比例	职级佣金	应付佣金金额	以往已支付比例	本次应支付比例	起保日期	终保日期
                 'company': '人民保险',
                 'insuranceCompany': '人保',
                 'organization': '全联',
@@ -887,7 +905,7 @@ class processAdditionalMoney():
             'ownerName': '姓名',
             'returnPrice': "金额",
             'mark': ['服务名称', ],
-            "price_offset": -1,
+            "price_offset": 0,
             'end_feature_list': ['合计:', '合计', '', None]}
         self.header_dict['金额'] = {
             'company': '国寿保险',
@@ -896,8 +914,9 @@ class processAdditionalMoney():
             'ownerName': '序号',
             'returnPrice': "金额",
             'mark': ['车架号', ],
-            "price_offset": -1,
+            "price_offset": 0,
             'end_feature_list': ['合计:', '合计', '', None]}
+
 
     def processExcel(self, sheet_list, cationNumber, states=5):
         # 常量
@@ -920,13 +939,15 @@ class processAdditionalMoney():
         price_offset = 0
         end_feature_list = ['', ]
         for row_value in sheet_list:
+            print(row_value)
             # 监测是否到最后一行
             if row_value[0] in end_feature_list:
                 break
             # 标题已确定
             elif head_row:
                 ownerName = row_value[ownerName_column]
-                returnPrice = round(row_value[returnPrice_column + price_offset], 2)
+                #print(returnPrice_column + price_offset)
+                returnPrice = round(float(row_value[returnPrice_column + price_offset]), 2)
                 row_count += 1
                 amount_count += returnPrice
                 mark = "" if mark_column == 0 else row_value[mark_column]
@@ -987,90 +1008,90 @@ class processAdditionalMoney():
 
 # 主任务流程
 def main_job():
-    try:
-        write_down_error('开始执行主任务')
-        ruuning_time_count = 0
-        sum_list = get_all_info()
-        while True:
-            mail = ProcessEmail()
-            email_info = mail.get_excel_from_email()
-            print(email_info)
-            # print(sum_list)
-            if email_info['status'] == 1:
-                for email_title in email_info['mail_list']:
-                    # 切片取 email的 前四位 来区分业务情况
-                    main_folder_name = email_title[:4]
-                    excel_folder_path = os.path.join(main_path, main_folder_name, email_title)
-                    sign = str(int(time.time() * 1000))
-                    for file in os.listdir(excel_folder_path):
-                        try:
-                            excel_path = os.path.join(excel_folder_path, file)
-                            # print(excel_path)
-                            # print(main_folder_name)
-                            # print(file)
-                            # input('')
-                            # 婉怡：零售 + 过账不垫资业务
-                            if main_folder_name == '聚仁台账':
-                                # 初始化读取零售过账业务的模板
-                                excel_process = ProcessExcelRetail(sum_list,sign)
-                                # 模板读表信息
-                                excel_process.load_excel_retail(excel_path)
-                                retail_data_inPrice, retail_data_inCharge, retail_data_count = excel_process.load_sheet_retail()
-                                unloan_data_inPrice, unloan_data_inCharge, unloan_data_count = excel_process.load_sheet_unloan()
-                                data_info = {0: {'inPrice': retail_data_inPrice,
-                                                 'inCharges': retail_data_inCharge,
-                                                 'count': retail_data_count},
-                                             2: {'inPrice': unloan_data_inPrice,
-                                                 'inCharges': unloan_data_inCharge,
-                                                 'count': unloan_data_count}}
-                                print('excel data:', data_info)
-                                # 因为是累加式的数据，所以我们需要做个减法在录入
-                                differ = calculate_differ(data_info, month_time=excel_process.month)
-                                print('after data:', differ)
-                                if int((datetime.datetime(year=int(email_title[4:8]), month=excel_process.month,
-                                                          day=1) - datetime.datetime.now()).days) > 0:
-                                    now_year = int(email_title[4:8]) - 1
-                                else:
-                                    now_year = email_title[4:8]
-                                # 插入数据
-                                MysqlAnalyzeUsage.insert_data(differ, year_time=now_year, file_name=file)
-                            # 婉怡：垫资业务
-                            elif main_folder_name == '聚仁垫资':
-                                # 初始化一个读取垫资的模板
-                                excel_process = ProcessExcelLoan(sum_list,sign)
-                                # 模板读表
-                                excel_process.load_excel_info(folder=excel_folder_path, single_excel_name=file)
-                                # 处理数据
-                                excel_process.process_data()
-                            # 文才：垫资 + 非垫资 业务
-                            elif main_folder_name == '全联表格':
-                                # 初始化一个读取全联的模板
-                                excel_process = QuanlianExcelProcess(sum_list, sign)
-                                excel_process.process_data(folder=excel_folder_path, single_excel_name=file)
-                            elif main_folder_name == '批增表格':
-                                excel_process = processAdditionalMoney()
-                                excel_process.getExcel(excel_path)
-                        except Exception as e:
-                            if '聚仁' in main_folder_name:
-                                sendsSMS(phone=juren_phone)
-                            elif '全联' in main_folder_name or '批增' in main_folder_name:
-                                sendsSMS(phone=quanlian_phone)
-                            sendsSMS()
-                            print('发生错误{}--{}'.format(e,file))
-                            write_down_error(str(e) + file)
-                    MysqlAnalyzeUsage.process_middle_to_advance()
-            ruuning_time_count += 1
-            next_time = '本次扫描结束，下次扫描时间 {}'.format(datetime.datetime.now() + timedelta(minutes=7))
-            print(next_time)
-            write_down_time(next_time)
-            time.sleep(60 * 7)
-    except Exception as e:
-        print('发生未知错误，详情请看日志')
-        sendsSMS()
-        write_down_error('run {} times '.format(ruuning_time_count) + '\n' + str(e))
-        print('系统将在 30 分钟后重启： {}'.format(datetime.datetime.now() + timedelta(minutes=30)))
-        time.sleep(60 * 30)
-        main_job()
+# try:
+    write_down_error('开始执行主任务')
+    ruuning_time_count = 0
+    sum_list = get_all_info()
+    while True:
+        mail = ProcessEmail()
+        email_info = mail.get_excel_from_email()
+        print(email_info)
+        # print(sum_list)
+        if email_info['status'] == 1:
+            for email_title in email_info['mail_list']:
+                # 切片取 email的 前四位 来区分业务情况
+                main_folder_name = email_title[:4]
+                excel_folder_path = os.path.join(main_path, main_folder_name, email_title)
+                sign = str(int(time.time() * 1000))
+                for file in os.listdir(excel_folder_path):
+                # try:
+                    excel_path = os.path.join(excel_folder_path, file)
+                    # print(excel_path)
+                    # print(main_folder_name)
+                    # print(file)
+                    # input('')
+                    # 婉怡：零售 + 过账不垫资业务
+                    if main_folder_name == '聚仁台账':
+                        # 初始化读取零售过账业务的模板
+                        excel_process = ProcessExcelRetail(sum_list,sign)
+                        # 模板读表信息
+                        excel_process.load_excel_retail(excel_path)
+                        retail_data_inPrice, retail_data_inCharge, retail_data_count = excel_process.load_sheet_retail()
+                        unloan_data_inPrice, unloan_data_inCharge, unloan_data_count = excel_process.load_sheet_unloan()
+                        data_info = {0: {'inPrice': retail_data_inPrice,
+                                         'inCharges': retail_data_inCharge,
+                                         'count': retail_data_count},
+                                     2: {'inPrice': unloan_data_inPrice,
+                                         'inCharges': unloan_data_inCharge,
+                                         'count': unloan_data_count}}
+                        print('excel data:', data_info)
+                        # 因为是累加式的数据，所以我们需要做个减法在录入
+                        differ = calculate_differ(data_info, month_time=excel_process.month)
+                        print('after data:', differ)
+                        if int((datetime.datetime(year=int(email_title[4:8]), month=excel_process.month,
+                                                  day=1) - datetime.datetime.now()).days) > 0:
+                            now_year = int(email_title[4:8]) - 1
+                        else:
+                            now_year = email_title[4:8]
+                        # 插入数据
+                        MysqlAnalyzeUsage.insert_data(differ, year_time=now_year, file_name=file)
+                    # 婉怡：垫资业务
+                    elif main_folder_name == '聚仁垫资':
+                        # 初始化一个读取垫资的模板
+                        excel_process = ProcessExcelLoan(sum_list,sign)
+                        # 模板读表
+                        excel_process.load_excel_info(folder=excel_folder_path, single_excel_name=file)
+                        # 处理数据
+                        excel_process.process_data()
+                    # 文才：垫资 + 非垫资 业务
+                    elif main_folder_name == '全联表格':
+                        # 初始化一个读取全联的模板
+                        excel_process = QuanlianExcelProcess(sum_list, sign)
+                        excel_process.process_data(folder=excel_folder_path, single_excel_name=file)
+                    elif main_folder_name == '批增表格':
+                        excel_process = processAdditionalMoney()
+                        excel_process.getExcel(excel_path)
+                # except Exception as e:
+                #     if '聚仁' in main_folder_name:
+                #         sendsSMS(phone=juren_phone)
+                #     elif '全联' in main_folder_name or '批增' in main_folder_name:
+                #         sendsSMS(phone=quanlian_phone)
+                #     sendsSMS()
+                #     print('发生错误{}--{}'.format(e,file))
+                #     write_down_error(str(e) + file)
+                MysqlAnalyzeUsage.process_middle_to_advance()
+        ruuning_time_count += 1
+        next_time = '本次扫描结束，下次扫描时间 {}'.format(datetime.datetime.now() + timedelta(minutes=7))
+        print(next_time)
+        write_down_time(next_time)
+        time.sleep(60 * 7)
+# except Exception as e:
+#     print('发生未知错误，详情请看日志')
+#     sendsSMS()
+#     write_down_error('run {} times '.format(ruuning_time_count) + '\n' + str(e))
+#     print('系统将在 30 分钟后重启： {}'.format(datetime.datetime.now() + timedelta(minutes=30)))
+#     time.sleep(60 * 30)
+#     main_job()
 
 if __name__ == '__main__':
     main_job()

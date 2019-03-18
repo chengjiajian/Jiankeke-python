@@ -8,12 +8,11 @@ from email.header import decode_header
 from email.utils import parseaddr
 from xlrd import open_workbook
 from openpyxl import load_workbook
-from xlrd import xldate_as_datetime
 from datetime import timedelta
 import re
-from decimal import *
 import time
 import os
+
 
 # 处理邮件
 class ProcessEmail:
@@ -199,6 +198,8 @@ class ProcessPayment():
         #         if row_value == '':
         #             pass
 # 主任务流程
+
+
 def main_job():
     write_down_error('开始执行主任务')
     ruuning_time_count = 0
@@ -227,6 +228,7 @@ def main_job():
         print(next_time)
         write_down_time(next_time)
         time.sleep(60 * 5)
+
 
 if __name__ == '__main__':
     main_job()

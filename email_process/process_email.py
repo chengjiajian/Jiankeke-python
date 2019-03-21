@@ -114,7 +114,8 @@ class ProcessEmail:
                         server.dele(i)
         return sum_email_info
 
-class ProcessPayment():
+
+class ProcessPayment:
     def __init__(self, file_path, programme_id, file_type):
         self.file_path = file_path
         self.programme_id = programme_id
@@ -214,14 +215,14 @@ def main_job():
                 date_info, programme_id, file_type = folder_name.split('_')
                 date_year_info = parse(date_info.split('-')[0])
                 # 遍历对应邮件下的文件
-                try:
-                    for file in os.listdir(excel_folder_path):
-                        excel_path = os.path.join(excel_folder_path, file)
-                        process_tool = ProcessPayment(excel_path, programme_id, file_type)
-                        process_tool.process_excel()
-                except Exception as e:
-                    #pass
-                    send_email(error_message_dict={"title": folder_name, "error_message": str(e)}, sender_email='busadvance@shiyugroup.com', receiver_email=sender_email)
+                # try:
+                for file in os.listdir(excel_folder_path):
+                    excel_path = os.path.join(excel_folder_path, file)
+                    process_tool = ProcessPayment(excel_path, programme_id, file_type)
+                    process_tool.process_excel()
+                # except Exception as e:
+                #     #pass
+                #     send_email(error_message_dict={"title": folder_name, "error_message": str(e)}, sender_email='busadvance@shiyugroup.com', receiver_email=sender_email)
                 #send_email(error_message_dict={"title": folder_name, "error_message": str("e")},sender_email='busadvance@shiyugroup.com', receiver_email=sender_email)
         ruuning_time_count += 1
         next_time = '本次扫描结束，下次扫描时间 {}'.format(datetime.datetime.now() + timedelta(minutes=5))

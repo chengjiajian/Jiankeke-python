@@ -66,27 +66,29 @@ def getCationNumberValue(cationNumber):
         #print(sql_content)
         cursor.execute(sql_content)
         result = cursor.fetchall()
-    return result
+        return result
+
 
 # 分析excel
 def processSheet(values, cationNumber, sheet_col_dict={}):
     basic_values = getCationNumberValue(cationNumber)
+    __insert_list = []
+    __row_count = 0
+    __amount_count = 0
     if basic_values:
         basic_values = basic_values[0]
         organization = basic_values[0]
-        insuranceCompany = company = basic_values[1]
+        insurance_company = company = basic_values[1]
         # 常量
         states = 5
-        row_count = 0
-        amount_count = 0
-        uName = 'cjj_python_additional'
+        uname = 'cjj_python_additional'
         uid = 8
         flag = 1
         status = 2
         type_flag = 1
         nesstype = 2
         postpone = 2
-        insert_list = []  # 录入列表
+          # 录入列表
         end_feature_list = ['合计：', '总计:', '合计', '', None]
         stop_hint = 0
         for row_value in values:
@@ -98,25 +100,26 @@ def processSheet(values, cationNumber, sheet_col_dict={}):
                         stop_hint = 1
                         break
                 if not stop_hint:
-                    returnPrice = row_value[sheet_col_dict['price']]
+                    return_price = row_value[sheet_col_dict['price']]
                     try:
-                        returnPrice = float(returnPrice)
-                        ownerName = '' if 'name' not in sheet_col_dict else row_value[sheet_col_dict['name']]
-                        row_count += 1
-                        amount_count += returnPrice
+                        return_price = float(return_price)
+                        owner_name = '' if 'name' not in sheet_col_dict else row_value[sheet_col_dict['name']]
+                        __row_count += 1
+                        __amount_count += return_price
                         remark = '' if 'remark' not in sheet_col_dict else row_value[sheet_col_dict['remark']]
-                        detail_list = [company, insuranceCompany, organization, ownerName, returnPrice, remark, uName, uid, flag,
+                        detail_list = [company, insurance_company, organization, owner_name, return_price, remark, uname, uid, flag,
                                        status, type_flag, nesstype, states, postpone, cationNumber]  # 详细信息
-                        insert_list.append(detail_list)  # 插表 的 列表
+                        __insert_list.append(detail_list)  # 插表 的 列表
                     except Exception as e:
                         print(e)
-        return [insert_list, row_count, amount_count]
+    return [__insert_list, __row_count, __amount_count]
 
 
 if __name__ == '__main__':
-    file_folder = r'C:\Users\ASUS\Desktop\批增表格范例'
+    file_folder = r'C:\Users\ASUS\Desktop\批增表格'
     files = os.listdir(file_folder)
     for file in files:
+        print(file)
         pure_file_name, extra_file_name = os.path.splitext(file)
         cationNumber = re.findall('SYCX[0-9]{13}', pure_file_name)
         if 'xls' in extra_file_name:
@@ -134,5 +137,6 @@ if __name__ == '__main__':
                         promt_count += row_count
                         money_count += amount_count
                         data_list.extend(insert_list)
-                MysqlAnalyzeUsage.update_advance_counts(promt_count, money_count, cationNumber)
-                MysqlAnalyzeUsage.insert_additional_detail(data_list)
+                        #print(sheet_name, insert_list, row_count, amount_count)
+                # MysqlAnalyzeUsage.update_advance_counts(promt_count, money_count, cationNumber)
+                # MysqlAnalyzeUsage.insert_additional_detail(data_list)

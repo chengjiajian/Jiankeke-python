@@ -8,6 +8,7 @@ from email.header import decode_header
 from email.utils import parseaddr
 from xlrd import open_workbook
 from openpyxl import load_workbook
+from email_process.analyzeExcelTest import processSheet,analyzeSheet
 from datetime import timedelta
 import pyexcel_xlsx
 import re
@@ -45,9 +46,9 @@ class ProcessEmail:
         for email_account in [nobusadvance_email, busadvance_email]:
             print('scanning the email:{}========================================'.format(email_account))
             if 'nobus' in email_account:
-                email_type = 2  # 预付
-            else:
                 email_type = 1  # 非预付
+            else:
+                email_type = 2  # 预付
             with ali_pop_usage(useraccount=email_account) as server:
                 # 使用list()返回所有邮件的编号，默认为字节类型的串
                 resp, mails, octets = server.list()
@@ -78,10 +79,10 @@ class ProcessEmail:
                             # 需要解码Subject字符串:
                             value = self.decode_str(title_value)
                             print('{}、这封邮件标题:'.format(i), value)
-                            programme_id = re.findall('SYP-\w{8}-\w{3}', value)
-                            if programme_id:
+                            identify_id = re.findall('SYP-\w{8}-\w{3}', value) if re.findall('SYP-\w{8}-\w{3}', value) else re.findall('SYCX[0-9]{13}', value)
+                            if identify_id:
                                 # time title是这封邮件的唯一标识 名 字
-                                time_title = '{}_{}_{}'.format(date_now, programme_id[0], email_type)
+                                time_title = '{}_{}_{}'.format(date_now, identify_id[0], email_type)
                                 save_path = os.path.join(main_path, time_title)
                                 if not os.path.exists(save_path):  # 如果文件夹不存在，创建文件夹
                                     os.makedirs(save_path)
@@ -123,6 +124,10 @@ class ProcessPayment:
         self.programme_id = programme_id
         self.file_type = int(file_type)
         self.cationNumber = cationNumber
+        self.insert_detail_list = []
+        self.insert_advance_data = []
+        self.sum_payment = 0
+        self.bussiness_type = ''
 
     # 获取 项目的 详细信息
     def GetProgrammeInfo(self):
@@ -135,17 +140,10 @@ class ProcessPayment:
     # 获取 项目 对应的excel信息
     def GetProgrammeExcelModel(self):
         with mysql_analyze() as cursor:
-            sql_content = "select createTime,insuranceNum,commercialPrice,compulsoryPrice,returnPrice,validTime,plate,insuranceName from contract_excel_model where programId='{}'".format(self.programme_id)
+            sql_content = "select createTime,insuranceNum,commercialPrice,compulsoryPrice,returnPrice,validTime,plate,insuranceName,remark from contract_excel_model where programId='{}'".format(self.programme_id)
             cursor.execute(sql_content)
             result = cursor.fetchall()
         return result
-
-    # 插入单条 付款信息
-    def InsertAdvance(self, data_list):
-        with mysql_analyze() as cursor:
-            sql_content = "INSERT INTO baoli_advances(cationDate, organization, inCompany, cationNumber, state, contractId, proName, postpone, actualMoney, returnMoney, interest, passMoney, taxation, contractName, returnPeriod, expectReturnTime, createTime, businessApprover, baoliType) \
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-            c = cursor.executemany(sql_content, data_list)
 
 
     # 先把excel预处理
@@ -167,16 +165,17 @@ class ProcessPayment:
         contractId_pro = programme_info_dict['programId']
         contractId = programme_info_dict['contractId']
         proName = programme_info_dict['conName']
+        baoliType = programme_info_dict['baoliType']
         #
-        # 判断是否为 付款清单excel
+# =====================是付款清单的  情况=======================
         header_line = ['收款账号', '开户行', '收款户名', '打款金额']
         if header_line in sheet_list:  # 判断是否为付款excel
+            self.bussiness_type = "payment_sheet"
             header_line_index = sheet_list.index(header_line)
-            actualMoney = 0
             for i in range(header_line_index + 1, len(sheet_list)):
                 print(sheet_list[i])
                 if sheet_list[i][3]:
-                    actualMoney += float(sheet_list[i][3])
+                    self.sum_payment += float(sheet_list[i][3])
             cationDate = datetime.datetime.now().strftime('%Y-%m-%d')
             returnPeriod = int(programme_info_dict['cycleTime']) if programme_info_dict['cycleTime'] else 0  # 回款周期
             interest_rate = float(programme_info_dict['interest'])  # 手续费率
@@ -184,78 +183,85 @@ class ProcessPayment:
             taxPoint_rate = float(programme_info_dict['taxPoint'])  # 税费
             # 必传
             state = 4
-            baoliType = programme_info_dict['baoliType']
             contractName = programme_info_dict['proName']
             businessApprover = programme_info_dict['businessApprover']
             # 实际回款 = 实际付款 * （（1+ 万分之五*周期）/ （1-税率-通道费率））  ##其中，周期为0的时候，对应到付（非垫资）业务
-            returnMoney = actualMoney * ((1+0.0005 * returnPeriod)/(1 - taxPoint_rate - passFee_rate)) if self.file_type == 1 else actualMoney * ((1+0.0005 * 0)/(1 - taxPoint_rate - passFee_rate))
-            interest = actualMoney * interest_rate  # 手续费
-            passMoney = actualMoney * passFee_rate  # 通道费
-            taxation = actualMoney * taxPoint_rate  # 税费
-            expectReturnTime = createTime if self.file_type == 2 else datetime.datetime.now() + datetime.timedelta(days=int(returnPeriod))  # 如果是预付，加法回款日期，非预付，即刻到账
-            advance = [cationDate, organization, inCompany, self.cationNumber, state, contractId_pro, proName, postpone, actualMoney, returnMoney, interest, passMoney, taxation, contractName, returnPeriod, expectReturnTime, createTime, businessApprover, baoliType]
-            self.InsertAdvance([advance, ])  # requires list data
+            returnMoney = self.sum_payment * ((1+0.0005 * returnPeriod)/(1 - taxPoint_rate - passFee_rate)) if self.file_type == 2 else self.sum_payment * ((1+0.0005 * 0)/(1 - taxPoint_rate - passFee_rate))
+            interest = self.sum_payment * interest_rate  # 手续费
+            passMoney = self.sum_payment * passFee_rate  # 通道费
+            taxation = self.sum_payment * taxPoint_rate  # 税费
+            expectReturnTime = createTime if self.file_type == 1 else datetime.datetime.now() + datetime.timedelta(days=int(returnPeriod))  # 如果是预付，加法回款日期，非预付，即刻到账
+            advance = [cationDate, organization, inCompany, self.cationNumber, state, contractId_pro, proName, postpone, self.sum_payment, returnMoney, interest, passMoney, taxation, contractName, returnPeriod, expectReturnTime, createTime, businessApprover, baoliType]
+            self.insert_advance_data.append(advance)
+# =====================不是付款清单的 情况=======================
         else:
-        # 不是付款清单的 情况
-            for i in range(len(sheet_list)):  # 遍历excel，判断title
-                stop_hint = 0
-                row_value = sheet_list[i]
-                for header_type in excel_model_list:
-                    header_title_list = [header_type[key] for key in header_type if header_type[key]]
-                    if header_title_list == [a for a in header_title_list if a in row_value]:  # 分析title模型是否 被包含在 行数据里
-                        stop_hint = 1
-                        header_dict = deepcopy(header_type)
+            self.bussiness_type = 'service_sheet'
+            if baoliType == '1':  # =佣金=手续费
+                for i in range(len(sheet_list)):  # 遍历excel，判断title
+                    stop_hint = 0
+                    row_value = sheet_list[i]
+                    # print(row_value)
+                    for header_type in excel_model_list:
+                        header_title_list = [header_type[key] for key in header_type if header_type[key]]
+                        if header_title_list == [a for a in header_title_list if a in row_value]:  # 分析title模型是否 被包含在 行数据里
+                            stop_hint = 1
+                            header_dict = deepcopy(header_type)
+                            # insert_list = []
+                            uName = 'cjj_python_newemail'
+                            uid = 8
+                            flag = 1
+                            status = 2
+                            for _row_value in sheet_list[i + 1:]:
+                                if not _row_value[0]:
+                                    break
+                                writeDate = _row_value[row_value.index(header_dict['createTime'])] \
+                                    if header_dict['createTime'] else datetime.datetime.now()  # 签单日期
+                                insuranceNum = _row_value[row_value.index(header_dict['insuranceNum'])] \
+                                    if header_dict['insuranceNum'] else ''  # 保单号
+                                commercialPrice = _row_value[row_value.index(header_dict['commercialPrice'])] \
+                                    if header_dict['commercialPrice'] else ''  # 商业险保费
+                                compulsoryPrice = _row_value[row_value.index(header_dict['compulsoryPrice'])] \
+                                    if header_dict['compulsoryPrice'] else ''  # 交强险保费
+                                returnPrice = _row_value[row_value.index(header_dict['returnPrice'])] \
+                                    if header_dict['returnPrice'] else 0  # 退费金额，手续费
+                                validTime = _row_value[row_value.index(header_dict['validTime'])] \
+                                    if header_dict['validTime'] else datetime.datetime.now()  # 生效时间
+                                plate = _row_value[row_value.index(header_dict['plate'])] \
+                                    if header_dict['plate'] else ''  # 生效时间
+                                owner_name = _row_value[row_value.index(header_dict['insuranceName'])] \
+                                    if header_dict['insuranceName'] else ''  # 投保人
+                                remark = _row_value[row_value.index(header_dict['remark'])] \
+                                    if header_dict['remark'] else '无'  # 备注
+                                #  商业险 和 交强险 分开2次插入
+                                self.sum_payment += returnPrice
+                                if commercialPrice:
+                                    rate = round(float(returnPrice) / float(commercialPrice), 4)
+                                    single_data = (organization, inCompany, inCompany, '', writeDate, owner_name, '', plate,
+                                                   commercialPrice, rate, returnPrice, status, uid, uName, createTime, flag,
+                                                   2, 2,
+                                                   '商业险', insuranceNum, '', self.cationNumber, returnPrice, 0, 1, 1,
+                                                   contractId,
+                                                   contractId_pro, proName, validTime, remark)
+                                    self.insert_detail_list.append(single_data)
+                                if compulsoryPrice:
+                                    rate = round(float(returnPrice) / float(compulsoryPrice), 4)
+                                    single_data = (organization, inCompany, inCompany, '', writeDate, owner_name, '', plate,
+                                                   compulsoryPrice, rate, returnPrice, status, uid, uName, createTime, flag,
+                                                   2, 1,
+                                                   '交强险', insuranceNum, '', self.cationNumber, returnPrice, 0, 1, 1,
+                                                   contractId,
+                                                   contractId_pro, proName, validTime, remark)
+                                    self.insert_detail_list.append(single_data)
+                            break
+                    if stop_hint:
                         break
-                if stop_hint:
-                    title_index = i
-                    break
-            else:
-                title_index = -1
-            # 为了看起来清晰  写在遍历外面
-            if title_index != -1:  # 如果匹配到了title
-                insert_list = []
-                uName = 'cjj_python_newemail'
-                uid = 8
-                flag = 1
-                status = 2
-                for row_value in sheet_list[title_index+1:]:
-                    if not row_value[0]:
-                        break
-                    writeDate       = row_value[sheet_list[title_index].index(header_dict['createTime'])] \
-                        if header_dict['createTime'] else datetime.datetime.now()  # 签单日期
-                    insuranceNum    = row_value[sheet_list[title_index].index(header_dict['insuranceNum'])] \
-                        if header_dict['insuranceNum'] else ''  # 保单号
-                    commercialPrice = row_value[sheet_list[title_index].index(header_dict['commercialPrice'])] \
-                        if header_dict['commercialPrice'] else ''  # 商业险保费
-                    compulsoryPrice = row_value[sheet_list[title_index].index(header_dict['compulsoryPrice'])] \
-                        if header_dict['compulsoryPrice'] else ''  # 交强险保费
-                    returnPrice     = row_value[sheet_list[title_index].index(header_dict['returnPrice'])] \
-                        if header_dict['returnPrice'] else 0  # 退费金额，手续费
-                    validTime       = row_value[sheet_list[title_index].index(header_dict['validTime'])] \
-                        if header_dict['validTime'] else datetime.datetime.now()  # 生效时间
-                    plate           = row_value[sheet_list[title_index].index(header_dict['plate'])] \
-                        if header_dict['plate'] else ''  # 生效时间
-                    owner_name      = row_value[sheet_list[title_index].index(header_dict['insuranceName'])] \
-                        if header_dict['insuranceName'] else ''  # 投保人
-                    #  商业险 和 交强险 分开2次插入
-                    if commercialPrice:
-                        rate = round(float(returnPrice) / float(commercialPrice), 4)
-                        single_data = (organization, inCompany, inCompany, '', writeDate, owner_name, '', plate,
-                                       commercialPrice,rate, returnPrice, status, uid, uName, createTime, flag, 2, 2,
-                                       '商业险', insuranceNum, '', self.cationNumber, returnPrice, 0, 1, 1, contractId,
-                                       contractId_pro, proName, validTime)
-                        insert_list.append(single_data)
-                    if compulsoryPrice:
-                        rate = round(float(returnPrice) / float(compulsoryPrice), 4)
-                        single_data = (organization, inCompany, inCompany, '', writeDate, owner_name, '', plate,
-                                       compulsoryPrice, rate, returnPrice, status, uid, uName, createTime, flag, 2, 1,
-                                       '交强险', insuranceNum, '', self.cationNumber, returnPrice, 0, 1, 1, contractId,
-                                       contractId_pro, proName, validTime)
-                        insert_list.append(single_data)
-                MysqlAnalyzeUsage.new_insert_single_insur(insert_list)
-            else:  # 没有匹配到title
-                pass
-
+            elif baoliType == '2':  # 批增 业务
+                sheet_col_dict = analyzeSheet(sheet_list)
+                if 'price' in sheet_col_dict:
+                    #  返回详细信息
+                    insert_list, row_count, amount_count = processSheet(sheet_list, self.programme_id, self.cationNumber, sheet_col_dict)
+                    self.insert_detail_list.extend(insert_list)
+                    self.sum_payment += sum([x[10] for x in insert_list])
 
 
 # 主任务流程
@@ -268,28 +274,92 @@ def main_job():
         if email_info['status'] == 1:
             # 遍历 邮件结果
             for folder_name, sender_email in email_info['mail_list'].items():
-                excel_folder_path = os.path.join(main_path, folder_name)
-                date_info, programme_id, file_type = folder_name.split('_')
-                date_year_info = parse(date_info.split('-')[0])
-                # 遍历对应邮件下的文件
-                # try:
-                cationNumber = 'SYCX{}'.format(str(int(time.time() * 1000)))  # 标识
-                for file in os.listdir(excel_folder_path):
-                    excel_path = os.path.join(excel_folder_path, file)
-                    process_tool = ProcessPayment(excel_path, programme_id, file_type, cationNumber)
-                    process_tool.process_excel()
-                # except Exception as e:
-                #     #pass
-                #     send_email(error_message_dict={"title": folder_name, "error_message": str(e)}, sender_email='busadvance@shiyugroup.com', receiver_email=sender_email)
-                #send_email(error_message_dict={"title": folder_name, "error_message": str("e")},sender_email='busadvance@shiyugroup.com', receiver_email=sender_email)
+                folder_path = os.path.join(main_path, folder_name)
+                #date_info, programme_id, file_type = folder_name.split('_')
+                date_info, identify_id, file_type = folder_name.split('_')
+                # 如果是续传文件
+                if re.findall('SYCX[0-9]{13}', identify_id):
+                    insert_detail_list = []
+                    sum_payment = 0
+                    sum_count = 0
+                    for file in os.listdir(folder_path):
+                        excel_data_dict = pyexcel_xlsx.read_data(os.path.join(folder_path, file))
+                        programme_id = MysqlAnalyzeUsage.get_programId_from_advance(identify_id)
+                        if programme_id:
+                            for sheet_name, values in excel_data_dict.items():
+                                sheet_col_dict = analyzeSheet(values)
+                                if 'price' in sheet_col_dict:
+                                    insert_list, row_count, amount_count = processSheet(values, programme_id,
+                                                                                        identify_id, sheet_col_dict)
+                                    insert_detail_list.extend(insert_list)
+                                    sum_payment += amount_count
+                                    sum_count += row_count
+                        MysqlAnalyzeUsage.new_insert_single_insur(insert_detail_list)
+                        MysqlAnalyzeUsage.update_advance_counts(counts=sum_count,amounts=sum_payment,cationNumber=identify_id)
+                # 如果是直接传付款凭证 + 清单
+                elif re.findall('SYP-\w{8}-\w{3}', identify_id):
+                    print('date_info,programme_id,file_type',date_info,identify_id,file_type)
+                    cationNumber = 'SYCX{}'.format(str(int(time.time() * 1000)))  # 标识
+                    folder_dict = {'payment_sheet': {}, 'service_sheet': {}}
+                    for file in os.listdir(folder_path):
+                        job = ProcessPayment(file_path=os.path.join(folder_path, file), programme_id=identify_id,
+                                             file_type=file_type, cationNumber=cationNumber)
+                        job.process_excel()
+                        datas = vars(job)
+                        folder_dict[datas['bussiness_type']] = datas
+                    insert_state = 1
+                    if file_type == "2":
+                        pay_amount = round(folder_dict['payment_sheet']['sum_payment'], 2)
+                        service_amount = round(folder_dict['service_sheet']['sum_payment'], 2)
+                        print('pay_amount', pay_amount, 'service_amount', service_amount)
+                        insert_state = 1 if pay_amount <= service_amount else 0
+                        if insert_state == 0:
+                            send_email(error_message_dict={"title": folder_name, "error_message": str('付款金额({})大于清单金额({})'.format(pay_amount, service_amount))},
+                                       sender_email='busadvance@shiyugroup.com', receiver_email=sender_email)
+                    if insert_state:
+                        # 插入付款申请
+                        MysqlAnalyzeUsage.InsertAdvance(folder_dict['payment_sheet']['insert_advance_data'])  # requires list data
+                        # 插入服务单明细
+                        if 'insert_detail_list' in folder_dict['service_sheet']:
+                            MysqlAnalyzeUsage.new_insert_single_insur(folder_dict['service_sheet']['insert_detail_list'])
+                        print('insert done')
         ruuning_time_count += 1
-        next_time = '本次扫描结束，下次扫描时间 {}'.format(datetime.datetime.now() + timedelta(minutes=5))
-        print(next_time)
+        next_time = '本次扫描结束，下次扫描时间 {}'.format(datetime.datetime.now() + timedelta(minutes=3))
         write_down_time(next_time)
-        time.sleep(60 * 5)
+        print(next_time)
+        time.sleep(60 * 3)
 
+def ttestJob():
+    cationNumber = 'SYCX{}'.format(str(int(time.time() * 1000)))  # 标识
+    folder_dict = {'payment_sheet': {}, 'service_sheet': {}}
+    folder_path = r'C:\Users\ASUS\Desktop\测试业务\测试3'
+    programme_id = 'SYP-20190108-004'
+    file_type = 2
+    for file in os.listdir(folder_path):
+        job = ProcessPayment(file_path=os.path.join(folder_path, file), programme_id=programme_id,
+                             file_type=file_type, cationNumber=cationNumber)
+        job.process_excel()
+        datas = vars(job)
+        folder_dict[datas['bussiness_type']] = datas
+    pay_amount = round(folder_dict['payment_sheet']['sum_payment'], 2)
+    service_amount = round(folder_dict['service_sheet']['sum_payment'], 2)
+    print('pay_amount', pay_amount, 'service_amount', service_amount)
+    if pay_amount <= service_amount:
+        pass
+    else:
+        send_email(error_message_dict={"title": '',
+                                       "error_message": str('付款金额({})大于清单金额({})'.format(pay_amount, service_amount))},
+                   sender_email='busadvance@shiyugroup.com', receiver_email='busadvance@shiyugroup.com')
 
 if __name__ == '__main__':
-    main_job()
-    # job = ProcessPayment(file_path=r'C:\Users\ASUS\Desktop\3.25-3.26清单.xlsx', programme_id='SYP-20190107-002', file_type=1)
-    # job.process_excel()
+    while True:
+        try:
+            main_job()
+        except Exception as e:
+            print('发生未知错误，详情请看日志')
+            send_email(error_message_dict={"title": 'systemdown', "error_message": str(e)},
+                       sender_email='busadvance@shiyugroup.com', receiver_email='378218354@qq.com')
+            write_down_error('run {} times '.format('\n' + str(e)))
+            print('系统将在 {} 分钟后重启： {}'.format(later_mins, datetime.datetime.now() + timedelta(minutes=later_mins)))
+            time.sleep(60 * later_mins)
+    #ttestJob()

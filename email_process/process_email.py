@@ -140,7 +140,7 @@ class ProcessPayment:
     # 获取 项目 对应的excel信息
     def GetProgrammeExcelModel(self):
         with mysql_analyze() as cursor:
-            sql_content = "select createTime,insuranceNum,commercialPrice,compulsoryPrice,returnPrice,validTime,plate,insuranceName,remark from contract_excel_model where programId='{}'".format(self.programme_id)
+            sql_content = "select createTime,insuranceNum,commercialPrice,compulsoryPrice,returnPrice,validTime,plate,insuranceName,remark,detailType,detailName,endValue from contract_excel_model where programId='{}'".format(self.programme_id)
             cursor.execute(sql_content)
             result = cursor.fetchall()
         return result
@@ -195,14 +195,15 @@ class ProcessPayment:
             self.insert_advance_data.append(advance)
 # =====================不是付款清单的 情况=======================
         else:
+            print('service_sheet')
             self.bussiness_type = 'service_sheet'
             if baoliType == '1':  # =佣金=手续费
                 for i in range(len(sheet_list)):  # 遍历excel，判断title
                     stop_hint = 0
                     row_value = sheet_list[i]
-                    # print(row_value)
-                    for header_type in excel_model_list:
-                        header_title_list = [header_type[key] for key in header_type if header_type[key]]
+                    for header_type in excel_model_list:  # 遍历同一个查询结果下的所有模板
+                        header_title_list = [header_type[key] for key in header_type if header_type[key] and key not in ('detailType', 'endValue')]  # 剔除不必要关键词
+                        print('header_title_list', header_title_list, 'a', [a for a in header_title_list if a in row_value])
                         if header_title_list == [a for a in header_title_list if a in row_value]:  # 分析title模型是否 被包含在 行数据里
                             stop_hint = 1
                             header_dict = deepcopy(header_type)
@@ -211,18 +212,16 @@ class ProcessPayment:
                             uid = 8
                             flag = 1
                             status = 2
+                            detailType = header_dict['detailType']
+                            print("header_dict['endValue']", header_dict['endValue'])
                             for _row_value in sheet_list[i + 1:]:
-                                if not _row_value[0]:
+                                if _row_value[0] == header_dict['endValue'] or not _row_value[0]:#not _row_value[0] or
                                     break
                                 writeDate = _row_value[row_value.index(header_dict['createTime'])] \
                                     if header_dict['createTime'] else datetime.datetime.now()  # 签单日期
                                 insuranceNum = _row_value[row_value.index(header_dict['insuranceNum'])] \
                                     if header_dict['insuranceNum'] else ''  # 保单号
-                                commercialPrice = _row_value[row_value.index(header_dict['commercialPrice'])] \
-                                    if header_dict['commercialPrice'] else ''  # 商业险保费
-                                compulsoryPrice = _row_value[row_value.index(header_dict['compulsoryPrice'])] \
-                                    if header_dict['compulsoryPrice'] else ''  # 交强险保费
-                                returnPrice = _row_value[row_value.index(header_dict['returnPrice'])] \
+                                returnPrice = float(_row_value[row_value.index(header_dict['returnPrice'])]) \
                                     if header_dict['returnPrice'] else 0  # 退费金额，手续费
                                 validTime = _row_value[row_value.index(header_dict['validTime'])] \
                                     if header_dict['validTime'] else datetime.datetime.now()  # 生效时间
@@ -234,27 +233,46 @@ class ProcessPayment:
                                     if header_dict['remark'] else '无'  # 备注
                                 #  商业险 和 交强险 分开2次插入
                                 self.sum_payment += returnPrice
-                                if commercialPrice:
-                                    rate = round(float(returnPrice) / float(commercialPrice), 4)
-                                    single_data = (organization, inCompany, inCompany, '', writeDate, owner_name, '', plate,
-                                                   commercialPrice, rate, returnPrice, status, uid, uName, createTime, flag,
-                                                   2, 2,
-                                                   '商业险', insuranceNum, '', self.cationNumber, returnPrice, 0, 1, 1,
-                                                   contractId,
-                                                   contractId_pro, proName, validTime, remark)
-                                    self.insert_detail_list.append(single_data)
-                                if compulsoryPrice:
-                                    rate = round(float(returnPrice) / float(compulsoryPrice), 4)
-                                    single_data = (organization, inCompany, inCompany, '', writeDate, owner_name, '', plate,
-                                                   compulsoryPrice, rate, returnPrice, status, uid, uName, createTime, flag,
-                                                   2, 1,
-                                                   '交强险', insuranceNum, '', self.cationNumber, returnPrice, 0, 1, 1,
-                                                   contractId,
-                                                   contractId_pro, proName, validTime, remark)
+                                if detailType == 1:
+                                    commercialPrice = _row_value[row_value.index(header_dict['commercialPrice'])] \
+                                        if header_dict['commercialPrice'] else ''  # 商业险保费
+                                    compulsoryPrice = _row_value[row_value.index(header_dict['compulsoryPrice'])] \
+                                        if header_dict['compulsoryPrice'] else ''  # 交强险保费
+                                    if commercialPrice:
+                                        rate = round(returnPrice / float(commercialPrice), 4)
+                                        single_data = (organization, inCompany, inCompany, '', writeDate, owner_name, '', plate,
+                                                       commercialPrice, rate, returnPrice, status, uid, uName, createTime, flag,
+                                                       2, 2,
+                                                       '商业险', insuranceNum, '', self.cationNumber, returnPrice, 0, 1, 1,
+                                                       contractId,
+                                                       contractId_pro, proName, validTime, remark)
+                                        self.insert_detail_list.append(single_data)
+                                    if compulsoryPrice:
+                                        rate = round(returnPrice / float(compulsoryPrice), 4)
+                                        single_data = (organization, inCompany, inCompany, '', writeDate, owner_name, '', plate,
+                                                       compulsoryPrice, rate, returnPrice, status, uid, uName, createTime, flag,
+                                                       2, 1,
+                                                       '交强险', insuranceNum, '', self.cationNumber, returnPrice, 0, 1, 1,
+                                                       contractId,
+                                                       contractId_pro, proName, validTime, remark)
+                                        self.insert_detail_list.append(single_data)
+                                elif detailType == 2:
+                                    detail_name = _row_value[row_value.index(header_dict['detailName'])] if header_dict['detailName'] else ''  # 商业险保费
+                                    payPrice = _row_value[row_value.index(header_dict['commercialPrice'])] \
+                                        if header_dict['commercialPrice'] else ''  # 商业险保费
+                                    rate = round(returnPrice / float(payPrice), 4)
+                                    single_data = (
+                                    organization, inCompany, inCompany, '', writeDate, owner_name, '', plate,
+                                    payPrice, rate, returnPrice, status, uid, uName, createTime, flag,
+                                    2, 3,
+                                    detail_name, insuranceNum, '', self.cationNumber, returnPrice, 0, 1, 1,
+                                    contractId,
+                                    contractId_pro, proName, validTime, remark)
                                     self.insert_detail_list.append(single_data)
                             break
                     if stop_hint:
                         break
+
             elif baoliType == '2':  # 批增 业务
                 sheet_col_dict = analyzeSheet(sheet_list)
                 if 'price' in sheet_col_dict:
@@ -298,7 +316,7 @@ def main_job():
                         MysqlAnalyzeUsage.update_advance_counts(counts=sum_count,amounts=sum_payment,cationNumber=identify_id)
                 # 如果是直接传付款凭证 + 清单
                 elif re.findall('SYP-\w{8}-\w{3}', identify_id):
-                    print('date_info,programme_id,file_type',date_info,identify_id,file_type)
+                    print('date_info,programme_id,file_type', date_info, identify_id, file_type)
                     cationNumber = 'SYCX{}'.format(str(int(time.time() * 1000)))  # 标识
                     folder_dict = {'payment_sheet': {}, 'service_sheet': {}}
                     for file in os.listdir(folder_path):
@@ -332,8 +350,8 @@ def main_job():
 def ttestJob():
     cationNumber = 'SYCX{}'.format(str(int(time.time() * 1000)))  # 标识
     folder_dict = {'payment_sheet': {}, 'service_sheet': {}}
-    folder_path = r'C:\Users\ASUS\Desktop\测试业务\测试3'
-    programme_id = 'SYP-20190108-004'
+    folder_path = r'C:\Users\ASUS\Desktop\测试业务\测试1'
+    programme_id = 'SYP-20190107-002'
     file_type = 2
     for file in os.listdir(folder_path):
         job = ProcessPayment(file_path=os.path.join(folder_path, file), programme_id=programme_id,
@@ -345,13 +363,14 @@ def ttestJob():
     service_amount = round(folder_dict['service_sheet']['sum_payment'], 2)
     print('pay_amount', pay_amount, 'service_amount', service_amount)
     if pay_amount <= service_amount:
-        pass
+        input('low')
     else:
         send_email(error_message_dict={"title": '',
                                        "error_message": str('付款金额({})大于清单金额({})'.format(pay_amount, service_amount))},
                    sender_email='busadvance@shiyugroup.com', receiver_email='busadvance@shiyugroup.com')
 
 if __name__ == '__main__':
+    #main_job()
     while True:
         try:
             main_job()
@@ -359,7 +378,7 @@ if __name__ == '__main__':
             print('发生未知错误，详情请看日志')
             send_email(error_message_dict={"title": 'systemdown', "error_message": str(e)},
                        sender_email='busadvance@shiyugroup.com', receiver_email='378218354@qq.com')
-            write_down_error('run {} times '.format('\n' + str(e)))
+            write_down_error('run times ,error occoured :\n{} \n'.format('\n' + str(e)))
             print('系统将在 {} 分钟后重启： {}'.format(later_mins, datetime.datetime.now() + timedelta(minutes=later_mins)))
             time.sleep(60 * later_mins)
-    #ttestJob()
+    ##ttestJob()

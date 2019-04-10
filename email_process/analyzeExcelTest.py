@@ -8,26 +8,29 @@ import re
 
 # 分析词类
 def processWord(word):
+    if isinstance(word, (float, int)):
+        if word > 10:
+            return 'price'
     word = str(word)
     vin_reg = re.compile('[A-Z0-9*]{17}')
     phone_reg = re.compile('1[0-9*]{10}')
-    money_reg = re.compile('[0-9.]+')
+    # money_reg = re.compile('[0-9.]+')
     name_reg = re.compile('[\u4E00-\u9FA5]{2,4}')
     if len(word) == 17 and re.findall(vin_reg, word):
         return 'vin'
-    elif re.findall(phone_reg, word):
+    elif re.findall(phone_reg, word) and len(word) == 11:
         return 'phone'
     elif 4 >= len(word) >= 2 and re.findall(name_reg, word):
         return 'name'
-    elif 6 >= len(word) >= 2 and re.findall(money_reg, word):
-        try:
-            word = str(float(word))
-            if 6 >= len(word) >= 4:
-                return 'price'
-            else:
-                return 'remark'
-        except Exception as e:
-            return 'remark'
+    # elif re.findall(money_reg, word):
+    #     try:
+    #         word = str(float(word))
+    #         if 7 >= len(word) >= 4:
+    #             return
+    #         else:
+    #             return 'remark'
+    #     except Exception as e:
+    #         return 'remark'
     else:
         return 'remark'
 
@@ -126,6 +129,16 @@ def analyzeExcel(sheet_list):
     pass
 
 if __name__ == '__main__':
+    excel = pyexcel_xlsx.read_data(r'C:\Users\ASUS\Desktop\测试业务\测试3\师域199500.xlsx')
+    for sheet_name,sheet_values in excel.items():
+        print(sheet_name)
+        print(sheet_values)
+        sheet_col_dict = analyzeSheet(sheet_values)
+        print(sheet_col_dict)
+        input('')
+    c = processWord(33.89)
+    print(c)
+    input('')
     file_folder = r'C:\Users\ASUS\Desktop\测试业务\测试3'
     files = os.listdir(file_folder)
     programId = cationNumber= 'SYP-20190108-004'

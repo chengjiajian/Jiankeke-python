@@ -166,10 +166,13 @@ class ProcessPayment:
         contractId = programme_info_dict['contractId']
         proName = programme_info_dict['conName']
         baoliType = programme_info_dict['baoliType']
+        while [] in sheet_list:
+            sheet_list.remove([])
         #
 # =====================是付款清单的  情况=======================
         header_line = ['收款账号', '开户行', '收款户名', '打款金额']
         if header_line in sheet_list:  # 判断是否为付款excel
+            print('payment_sheet')
             self.bussiness_type = "payment_sheet"
             header_line_index = sheet_list.index(header_line)
             for i in range(header_line_index + 1, len(sheet_list)):
@@ -186,8 +189,10 @@ class ProcessPayment:
             contractName = programme_info_dict['proName']
             businessApprover = programme_info_dict['businessApprover']
             # 实际回款 = 实际付款 * （（1+ 万分之五*周期）/ （1-税率-通道费率））  ##其中，周期为0的时候，对应到付（非垫资）业务
-            returnMoney = self.sum_payment * ((1+0.0005 * returnPeriod)/(1 - taxPoint_rate - passFee_rate)) if self.file_type == 2 else self.sum_payment * ((1+0.0005 * 0)/(1 - taxPoint_rate - passFee_rate))
-            interest = self.sum_payment * interest_rate  # 手续费
+            # returnMoney = self.sum_payment * ((1+0.0005 * returnPeriod)/(1 - taxPoint_rate - passFee_rate)) if self.file_type == 2 else self.sum_payment * ((1+0.0005 * 0)/(1 - taxPoint_rate - passFee_rate))  #  经过讨论作废此公式  20190403
+            # 新公式 实际回款 = 实际付款 * （ 1/（1-税率-通道费率）+ 万分之五*周期））
+            returnMoney = self.sum_payment * ((1 / (1 - taxPoint_rate - passFee_rate)) + 0.0005 * returnPeriod) if self.file_type == 2 else self.sum_payment / (1 - taxPoint_rate - passFee_rate)
+            interest = self.sum_payment * 0.0005 * returnPeriod  # 手续费 # self.sum_payment * interest_rate
             passMoney = self.sum_payment * passFee_rate  # 通道费
             taxation = self.sum_payment * taxPoint_rate  # 税费
             expectReturnTime = createTime if self.file_type == 1 else datetime.datetime.now() + datetime.timedelta(days=int(returnPeriod))  # 如果是预付，加法回款日期，非预付，即刻到账
@@ -198,13 +203,18 @@ class ProcessPayment:
             print('service_sheet')
             self.bussiness_type = 'service_sheet'
             if baoliType == '1':  # =佣金=手续费
+                print('手续费')
                 for i in range(len(sheet_list)):  # 遍历excel，判断title
                     stop_hint = 0
                     row_value = sheet_list[i]
                     for header_type in excel_model_list:  # 遍历同一个查询结果下的所有模板
-                        header_title_list = [header_type[key] for key in header_type if header_type[key] and key not in ('detailType', 'endValue')]  # 剔除不必要关键词
-                        print('header_title_list', header_title_list, 'a', [a for a in header_title_list if a in row_value])
-                        if header_title_list == [a for a in header_title_list if a in row_value]:  # 分析title模型是否 被包含在 行数据里
+                        header_title_list = sorted([header_type[key] for key in header_type if
+                                                    header_type[key] and key not in (
+                                                    'detailType', 'endValue')])  # 剔除不必要关键词
+                        print('header_title_list', header_title_list, 'a',
+                              [a for a in header_title_list if a in row_value])
+                        if header_title_list == sorted(
+                                [a for a in header_title_list if a in row_value]):  # 分析title模型是否 被包含在 行数据里
                             stop_hint = 1
                             header_dict = deepcopy(header_type)
                             # insert_list = []
@@ -272,9 +282,10 @@ class ProcessPayment:
                             break
                     if stop_hint:
                         break
-
             elif baoliType == '2':  # 批增 业务
+                print('批增')
                 sheet_col_dict = analyzeSheet(sheet_list)
+                #sheet_col_dict = {'price':2, 'remark':1}
                 if 'price' in sheet_col_dict:
                     #  返回详细信息
                     insert_list, row_count, amount_count = processSheet(sheet_list, self.programme_id, self.cationNumber, sheet_col_dict)
@@ -326,6 +337,7 @@ def main_job():
                         datas = vars(job)
                         folder_dict[datas['bussiness_type']] = datas
                     insert_state = 1
+
                     if file_type == "2":
                         pay_amount = round(folder_dict['payment_sheet']['sum_payment'], 2)
                         service_amount = round(folder_dict['service_sheet']['sum_payment'], 2)
@@ -350,8 +362,8 @@ def main_job():
 def ttestJob():
     cationNumber = 'SYCX{}'.format(str(int(time.time() * 1000)))  # 标识
     folder_dict = {'payment_sheet': {}, 'service_sheet': {}}
-    folder_path = r'C:\Users\ASUS\Desktop\测试业务\测试1'
-    programme_id = 'SYP-20190107-002'
+    folder_path = r'C:\Users\ASUS\Desktop\测试业务\测试6'
+    programme_id = 'SYP-20190107-003'
     file_type = 2
     for file in os.listdir(folder_path):
         job = ProcessPayment(file_path=os.path.join(folder_path, file), programme_id=programme_id,
@@ -362,6 +374,7 @@ def ttestJob():
     pay_amount = round(folder_dict['payment_sheet']['sum_payment'], 2)
     service_amount = round(folder_dict['service_sheet']['sum_payment'], 2)
     print('pay_amount', pay_amount, 'service_amount', service_amount)
+    input('')
     if pay_amount <= service_amount:
         input('low')
     else:
@@ -370,15 +383,17 @@ def ttestJob():
                    sender_email='busadvance@shiyugroup.com', receiver_email='busadvance@shiyugroup.com')
 
 if __name__ == '__main__':
-    #main_job()
-    while True:
-        try:
-            main_job()
-        except Exception as e:
-            print('发生未知错误，详情请看日志')
-            send_email(error_message_dict={"title": 'systemdown', "error_message": str(e)},
-                       sender_email='busadvance@shiyugroup.com', receiver_email='378218354@qq.com')
-            write_down_error('run times ,error occoured :\n{} \n'.format('\n' + str(e)))
-            print('系统将在 {} 分钟后重启： {}'.format(later_mins, datetime.datetime.now() + timedelta(minutes=later_mins)))
-            time.sleep(60 * later_mins)
+    # ttestJob()
+    # input('')
+    # #main_job()
+    # while True:
+    #     try:
+    main_job()
+        # except Exception as e:
+        #     print('发生未知错误，详情请看日志')
+        #     send_email(error_message_dict={"title": 'systemdown', "error_message": str(e)},
+        #                sender_email='busadvance@shiyugroup.com', receiver_email='378218354@qq.com')
+        #     write_down_error('run times ,error occoured :\n{} \n'.format('\n' + str(e)))
+        #     print('系统将在 {} 分钟后重启： {}'.format(later_mins, datetime.datetime.now() + timedelta(minutes=later_mins)))
+        #     time.sleep(60 * later_mins)
     ##ttestJob()
